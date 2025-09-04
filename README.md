@@ -11,7 +11,25 @@ Workflow sementara
 (7) Cari informasi mengenai tantangan etika dan teknis yang terkait dengan deteksi konten, seperti masalah privasi, potensi false positive, dan penanganan konten yang ambigu.
 (8) Bandingkan fitur-fitur yang dianalisis dengan solusi atau layanan sejenis yang sudah ada di pasar untuk mengidentifikasi praktik terbaik dan kekurangan yang bisa diperbaiki.
 
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Metode yang akan digunakan : (*BELUM ACC*)
 
 Notifikasi : API based crawling
 Searching : Focused Crawling (hanya mengambil fokus pencarian dengan keyword filter)
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FITUR YANG ADA DI WEB CRAWLER (*BELUM ACC*)
+
+Textbox Search
+Pilihan antar Web, Image, Videos, atau News
+Judul Crawler
+URL Frontier / scheduler (Tempat menyimpan daftar alamat URL yang akan dikunjungi)
+Fetching (Modul yang mengambil isi halaman web dari URL)
+Parser / Content Extractor (Membaca isi halaman)
+Link Extractor (Mengambil semua tautan dalam halaman)
+Duplicate Detection (Mencegah mengunjungi laman yang sama)
+Politeness / Rate Limiting (Mengatur kecepatan request agar tidak membebani  server)
+Storage & Indexing (Menyimpan hasil crawling dalam bentuk database / file)
+Scheduling & Prioritization (Menentukan kapan laman harus dikunjungi ulang)
+Scalability & Distributed Crawling (Menjalankan banyak crawler sekaligus)
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
