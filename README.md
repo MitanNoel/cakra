@@ -10,3 +10,4 @@ Workflow sementara
 (6) Pertimbangkan fitur manajemen dan konfigurasi, seperti kemampuan untuk memasukkan daftar URL, mengatur jadwal crawling, dan menyesuaikan tingkat sensitivitas deteksi.
 (7) Cari informasi mengenai tantangan etika dan teknis yang terkait dengan deteksi konten, seperti masalah privasi, potensi false positive, dan penanganan konten yang ambigu.
 (8) Bandingkan fitur-fitur yang dianalisis dengan solusi atau layanan sejenis yang sudah ada di pasar untuk mengidentifikasi praktik terbaik dan kekurangan yang bisa diperbaiki.
+
