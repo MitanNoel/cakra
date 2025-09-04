@@ -11,3 +11,7 @@ Workflow sementara
 (7) Cari informasi mengenai tantangan etika dan teknis yang terkait dengan deteksi konten, seperti masalah privasi, potensi false positive, dan penanganan konten yang ambigu.
 (8) Bandingkan fitur-fitur yang dianalisis dengan solusi atau layanan sejenis yang sudah ada di pasar untuk mengidentifikasi praktik terbaik dan kekurangan yang bisa diperbaiki.
 
+Metode yang akan digunakan : (*BELUM ACC*)
+
+Notifikasi : API based crawling
+Searching : Focused Crawling (hanya mengambil fokus pencarian dengan keyword filter)
