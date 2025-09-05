@@ -479,16 +479,16 @@ def judge_evidence(text_result, vision_results, url, server_info, shadowdoor_lin
     
     evidence = f"Text: {text_result}\nVision: {vision_text}\nServer Info: {json.dumps(server_info)}\nShadowdoor Links: {json.dumps(shadowdoor_links)}\nVulnerabilities: {json.dumps(vulnerabilities)}"
     prompt = f"Based on evidence from text, vision analysis, server information, shadowdoor detection, and vulnerability analysis of {url}, provide a structured judgment:\n- Confidence Score (0-100, where 0 is very safe and 100 is very dangerous)\n- Detailed Result (malicious/safe)\n- Website Weaknesses (e.g., outdated software, missing security headers like HTTPS, HSTS, CSP, X-Frame-Options)\n- Security Vulnerabilities (potential XSS, SQL injection, CSRF indicators)\n- Shadowdoor/Defacement Detection (links to illegal content, malicious domains)\n- Domain/IP Address: {server_info.get('ip_address', 'Unknown')}\n- Server Version: {server_info.get('server', 'Unknown')}\n- Content Analysis: Check for malicious scripts, phishing elements, or illegal content\n- Recommendations (only for detailed view)"
+    
     try:
-        response = ollama.generate(model=model, prompt=prompt + '\n\n' + evidence)
+        response = ollama.generate(model=model, prompt=prompt)
         full_response = clean_response(response['response'])
         
         # Extract confidence score
         confidence = None
         lines = full_response.split('\n')
         for line in lines:
-            if 'confidence score' in line.lower():
-                # Extract number from the line
+            if 'confidence' in line.lower():
                 import re
                 match = re.search(r'\b(\d{1,3})\b', line)
                 if match:
@@ -758,30 +758,69 @@ def parallel_scan(sites, max_workers=8):  # Increased from 3 to 8 for faster pro
                 del futures[future]  # Remove completed future
                 break  # Process one at a time to allow adding new ones
     
-    # Now judge sequentially
-    for result in analysis_results:
-        if stop_scan:
-            break
+    # Now judge in parallel for faster processing
+    # Emit status that judging phase has started
+    socketio.emit('scan_status', {'scanning': True, 'phase': 'judging'})
+    
+    def judge_single_result(result):
+        if 'error' in result:
+            return result
+        
+        # Emit current judging status
+        emit_data = {
+            'url': result['url'], 
+            'judgment': 'Judging in Progress', 
+            'text_result': result['text_result'], 
+            'vision_results': result['vision_results'],
+            'server_info': result.get('server_info', {})
+        }
+        socketio.emit('scan_update', emit_data)
+        
+        final_judgment, confidence = judge_evidence(
+            result['text_result'], 
+            result['vision_results'], 
+            result['url'], 
+            result.get('server_info', {}),
+            result.get('shadowdoor_links', []),
+            result.get('vulnerabilities', []),
+            OLLAMA_MODELS['judge']
+        )
+        if not final_judgment or final_judgment.strip() == '':
+            final_judgment = "Safe website - no malicious content detected"
+            confidence = 0
+        
+        # Update result with judgment and confidence
+        result['judgment'] = final_judgment
+        result['confidence'] = confidence
+        
+        # Emit final result
+        emit_data = {
+            'url': result['url'], 
+            'judgment': final_judgment, 
+            'text_result': result['text_result'], 
+            'vision_results': result['vision_results'],
+            'server_info': result.get('server_info', {}),
+            'confidence': confidence
+        }
+        socketio.emit('scan_update', emit_data)
+        
+        return result
+    
+    # Use ThreadPoolExecutor for parallel judging
+    judged_results = []
+    with ThreadPoolExecutor(max_workers=min(4, len(analysis_results))) as executor:  # Limit to 4 concurrent judgments
+        futures = {executor.submit(judge_single_result, result): result for result in analysis_results}
+        for future in as_completed(futures):
+            if stop_scan:
+                break
+            judged_result = future.result()
+            judged_results.append(judged_result)
+    
+    # Process results for counters
+    for result in judged_results:
         if 'error' not in result:
-            final_judgment, confidence = judge_evidence(
-                result['text_result'], 
-                result['vision_results'], 
-                result['url'], 
-                result.get('server_info', {}),
-                result.get('shadowdoor_links', []),
-                result.get('vulnerabilities', []),
-                OLLAMA_MODELS['judge']
-            )
-            if not final_judgment or final_judgment.strip() == '':
-                final_judgment = "Safe website - no malicious content detected"
-                confidence = 0
-            
-            # Update result with judgment and confidence
-            result['judgment'] = final_judgment
-            result['confidence'] = confidence
-            
             # Parse judgment for counters
-            judgment = final_judgment.lower()
+            judgment = result['judgment'].lower()
             if 'malicious' in judgment or 'dangerous' in judgment:
                 dangerous_count += 1
                 # Learn new keywords
@@ -802,19 +841,6 @@ def parallel_scan(sites, max_workers=8):  # Increased from 3 to 8 for faster pro
                 'dangerous': dangerous_count,
                 'found': total_sites
             })
-            
-            # Emit final update
-            emit_data = {
-                'url': result['url'], 
-                'judgment': final_judgment, 
-                'confidence': confidence, 
-                'text_result': result['text_result'], 
-                'vision_results': result['vision_results'],
-                'server_info': result.get('server_info', {}),
-                'shadowdoor_links': result.get('shadowdoor_links', []),
-                'vulnerabilities': result.get('vulnerabilities', [])
-            }
-            socketio.emit('scan_update', emit_data)
             emit_progress()  # Emit progress after each completion
     
     scan_results.extend(analysis_results)
@@ -1572,7 +1598,11 @@ def home():
                 
                 if (data.scanning) {
                     button.textContent = 'Stop Scan';
-                    statusSummary.textContent = 'Scanning in progress...';
+                    if (data.phase === 'judging') {
+                        statusSummary.textContent = 'Analyzing results with AI (parallel processing)...';
+                    } else {
+                        statusSummary.textContent = 'Scanning in progress...';
+                    }
                     progressSection.style.display = 'block';
                 } else {
                     button.textContent = 'Start Scan';
