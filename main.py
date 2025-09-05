@@ -13,6 +13,14 @@ import socket
 import ssl
 import csv
 import io
+import logging
+from datetime import datetime
+
+# Import our new modules
+from database import ScanDatabase
+from intelligence import IntelligenceGatherer
+from config_loader import ConfigLoader
+
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
@@ -22,6 +30,15 @@ try:
     SELENIUM_AVAILABLE = True
 except ImportError:
     SELENIUM_AVAILABLE = False
+
+# Initialize configuration
+config = ConfigLoader()
+db = ScanDatabase(config.get_database_config()['filename'])
+intelligence = IntelligenceGatherer()
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 app = Flask(__name__)
 socketio = SocketIO(app)
 
@@ -31,57 +48,60 @@ def handle_connect():
 
 @socketio.on('request_initial')
 def handle_request_initial():
-    global scanned_count, potential_count, dangerous_count, scan_results, total_sites, is_scanning
+    global scanned_count, potential_count, dangerous_count, scan_results, total_sites, is_scanning, total_scanning_sites
+    
+    # Initialize counters if not already done
+    if 'scanned_count' not in globals():
+        scanned_count = 0
+        potential_count = 0
+        dangerous_count = 0
+        total_sites = 0
+        total_scanning_sites = 0
+    
+    # Get statistics from database
+    stats = db.get_statistics()
+    
+    # Get all results to properly count
+    all_results = db.query_results(limit=1000)
+    
+    # Count properly:
+    # - Found: Total unique sites discovered (all entries in database)
+    # - Scanned: Sites with completed analysis (both text and vision analysis done)
+    found_count = len(all_results)  # Total sites discovered
+    
+    # A site is "scanned" if it has both text_result and vision_results, and judgment is not "Queued"
+    completed_count = 0
+    for result in all_results:
+        has_text = result.get('text_result') and result.get('text_result').strip()
+        has_vision = result.get('vision_results') and len(result.get('vision_results', [])) > 0
+        is_not_queued = result.get('judgment') and result.get('judgment') != 'Queued'
+        
+        if has_text and has_vision and is_not_queued:
+            completed_count += 1
+    
+    # Use database stats for threat classification
+    potential_count = stats.get('potential_count', 0)
+    dangerous_count = stats.get('dangerous_count', 0)
+    
+    # Get recent results for display
+    recent_results = db.query_results(limit=100)
+    
     socketio.emit('initial_state', {
-        'scanned': scanned_count,
+        'scanned': completed_count,  # Only fully analyzed sites
+        'found': found_count,        # Total discovered sites
         'potential': potential_count,
         'dangerous': dangerous_count,
-        'results': scan_results,
-        'total_sites': total_sites
+        'results': recent_results,
+        'total_sites': found_count
     })
-    socketio.emit('total_sites', total_sites)
+    socketio.emit('total_sites', found_count)
     socketio.emit('scan_status', {'scanning': is_scanning})
 
-OLLAMA_MODELS = {
-    'text': 'qwen2:0.5b',
-    'vision': 'moondream:1.8b',
-    'judge': 'deepseek-r1:1.5b'
-}
-SHADOWDOOR_DOMAINS = {
-    'illegal_gambling': [
-        'example-gambling-site.com', 'fake-casino.net', 'illegal-betting.org'
-    ],
-    'pornography': [
-        'adult-content-site.com', 'illegal-porn.net', 'explicit-material.org'
-    ],
-    'phishing': [
-        'fake-bank-login.com', 'phishing-site.net', 'credential-theft.org'
-    ],
-    'malware': [
-        'malware-host.com', 'trojan-download.net', 'ransomware-site.org'
-    ]
-}
-
-VULNERABILITY_PATTERNS = {
-    'outdated_software': ['wordpress', 'joomla', 'drupal'],
-    'exposed_admin': ['/admin', '/wp-admin', '/administrator'],
-    'weak_permissions': ['chmod 777', 'writable config'],
-    'sql_injection': ['\' or 1=1', 'union select'],
-    'xss_vulnerable': ['<script>', 'javascript:', 'onload='],
-    'file_upload': ['upload.php', 'filemanager'],
-    'default_credentials': ['admin/admin', 'root/root']
-}
-
-MALICIOUS_KEYWORDS = set([
-    'casino', 'gambling', 'redirect', 'illegal', 'porn', 'drugs',
-    'judi', 'jvdi', 'ju_di', 'toGel', 'tog3l', 't0gel', 'slot', 'sl0t', 's|ot',
-    'gacor', 'g@cor', 'gac0r', 'taruhan', 'taruh@n', 'bet', 'b3t', 'b3tting',
-    'poker', 'p0ker', 'pok3r', 'kasino', 'c@sin0', 'jackpot', 'jackp0t', 'j@ckpot',
-    'bola', 'b0la', '18+', 'dewasa', 'dewas@', 'bokep', 'b0kep', 'boqep',
-    'film panas', 'film p@nas', 'seks', 's3ks', 's3x', 'ml', 'm3sum', 'mesum',
-    'video dewasa', 'vidio dewasa', 'cewek nakal', 'c3wek nakal', 'cwk nakal',
-    'ABG nakal', 'ABG n@kal'
-])
+# Load configuration values
+OLLAMA_MODELS = config.get_models()
+SHADOWDOOR_DOMAINS = config.get_shadowdoor_domains()
+VULNERABILITY_PATTERNS = config.get_vulnerability_patterns()
+MALICIOUS_KEYWORDS = set(config.get_malicious_keywords())
 
 def detect_anti_crawler(html_content, js_scripts):
     """Detect common anti-crawler techniques in HTML and JS."""
@@ -110,72 +130,32 @@ def detect_anti_crawler(html_content, js_scripts):
     return indicators
 scan_results = []
 scan_thread = None
-scanned_count = 0
-potential_count = 0
-dangerous_count = 0
-total_sites = 0
 stop_scan = False
 is_scanning = False
 current_scanning = []
-RESULTS_FILE = 'scan_results.json'
-CACHE_FILE = 'scan_cache.json'
-scan_cache = {}
+
+# Remove old file-based variables
+# RESULTS_FILE = 'scan_results.json'
+# CACHE_FILE = 'scan_cache.json'
+# scan_cache = {}
 
 def load_scan_results():
-    """Load scan results from file if it exists."""
-    global scan_results, scanned_count, potential_count, dangerous_count, total_sites
-    if os.path.exists(RESULTS_FILE):
-        try:
-            with open(RESULTS_FILE, 'r') as f:
-                data = json.load(f)
-                scan_results = data.get('results', [])
-                scanned_count = data.get('scanned_count', 0)
-                potential_count = data.get('potential_count', 0)
-                dangerous_count = data.get('dangerous_count', 0)
-                total_sites = len(set(result['url'] for result in scan_results))  # Unique URLs
-        except Exception as e:
-            print(f"Error loading results: {e}")
-    
-    # Load cache
-    global scan_cache
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, 'r') as f:
-                scan_cache = json.load(f)
-        except Exception as e:
-            print(f"Error loading cache: {e}")
+    """Load scan results from database (no longer needed - handled by database class)."""
+    pass
 
 def save_scan_results():
-    """Save scan results to file."""
-    global scan_results, scanned_count, potential_count, dangerous_count
-    try:
-        data = {
-            'results': scan_results,
-            'scanned_count': scanned_count,
-            'potential_count': potential_count,
-            'dangerous_count': dangerous_count,
-            'timestamp': time.time()
-        }
-        with open(RESULTS_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"Error saving results: {e}")
-    
-    # Save cache
-    try:
-        with open(CACHE_FILE, 'w') as f:
-            json.dump(scan_cache, f, indent=2)
-    except Exception as e:
-        print(f"Error saving cache: {e}")
+    """Save scan results to database (no longer needed - handled by database class)."""
+    pass
 
 def emit_progress():
-    global scanned_count, total_sites, start_time, current_scanning
-    if total_sites > 0:
-        percentage = (scanned_count / total_sites) * 100
+    global scanned_count, total_scanning_sites, start_time, current_scanning
+    if total_scanning_sites > 0:
+        # Use initial scanning count for progress, not the dynamic total_sites
+        percentage = (scanned_count / total_scanning_sites) * 100
         elapsed = time.time() - start_time
         if scanned_count > 0:
             avg_time = elapsed / scanned_count
-            remaining = total_sites - scanned_count
+            remaining = total_scanning_sites - scanned_count
             eta = avg_time * remaining
         else:
             eta = 0
@@ -184,7 +164,7 @@ def emit_progress():
             'eta': round(eta, 2),
             'current_scanning': current_scanning.copy(),
             'completed': scanned_count,
-            'total': total_sites
+            'total': total_scanning_sites
         })
 
 def google_dork_search(keywords, domains):
@@ -333,26 +313,37 @@ def fetch_with_selenium(url):
     
     import tempfile
     import os
+    import time
+    import uuid
     
     # Create a unique temporary directory for this session
-    temp_dir = tempfile.mkdtemp(prefix='selenium_')
+    session_id = str(uuid.uuid4())[:8]
+    temp_dir = tempfile.mkdtemp(prefix=f'selenium_{session_id}_')
     
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
-    options.add_argument('--window-size=1920,1080')
+    options.add_argument('--window-size=1280,720')  # Reduced resolution for faster rendering
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
     options.add_argument(f'--user-data-dir={temp_dir}')
+    options.add_argument('--disable-extensions')
+    options.add_argument('--disable-plugins')
+    options.add_argument('--disable-background-timer-throttling')  # Faster processing
+    options.add_argument('--disable-backgrounding-occluded-windows')
+    options.add_argument('--disable-renderer-backgrounding')
+    options.add_argument('--disable-features=VizDisplayCompositor')  # Faster rendering
+    # Removed --disable-images to allow image analysis
     
     driver = None
     try:
         driver = webdriver.Chrome(options=options)
+        driver.set_page_load_timeout(5)  # Reduce timeout from default 10s to 5s
         driver.get(url)
         
-        # Wait for page to load
-        WebDriverWait(driver, 10).until(
+        # Wait for page to load with reduced timeout
+        WebDriverWait(driver, 5).until(  # Reduced from 10s to 5s
             lambda d: d.execute_script('return document.readyState') == 'complete'
         )
         
@@ -361,12 +352,25 @@ def fetch_with_selenium(url):
         soup = BeautifulSoup(html, 'html.parser')
         
         text_content = soup.get_text()
-        images = [img['src'] for img in soup.find_all('img') if 'src' in img.attrs and img['src'].startswith('http')]
+        
+        # Extract images with better URL handling
+        images = []
+        from urllib.parse import urljoin
+        for img in soup.find_all('img'):
+            if 'src' in img.attrs:
+                img_src = img['src']
+                # Convert relative URLs to absolute URLs
+                if img_src.startswith('http'):
+                    images.append(img_src)
+                elif img_src.startswith('/') or img_src.startswith('./'):
+                    absolute_url = urljoin(url, img_src)
+                    images.append(absolute_url)
+        
         js_scripts = [script.get_text() for script in soup.find_all('script') if script.get_text()]
         
         return {
             'text_content': text_content,
-            'images': images,
+            'images': images[:10],  # Limit to first 10 images
             'js_scripts': js_scripts,
             'html': html
         }
@@ -399,18 +403,111 @@ def analyze_text(content, model):
         return f"Error: {str(e)}", []
 
 def analyze_images(images, model):
+    """Analyze images for security threats and malicious content."""
+    if not images:
+        return {"results": ["No images found for analysis"], "analyzed_images": []}
+    
     results = []
-    for img_url in images[:5]:
+    analyzed_images = []
+    
+    # Check if vision model is available
+    try:
+        # Test if the model exists
+        test_response = ollama.list()
+        
+        # Handle Ollama ListResponse object
+        available_models = []
+        if hasattr(test_response, 'models'):
+            for m in test_response.models:
+                if hasattr(m, 'model'):
+                    available_models.append(m.model)
+                elif hasattr(m, 'name'):
+                    available_models.append(m.name)
+                else:
+                    available_models.append(str(m))
+        
+        if model not in available_models:
+            return {"results": [f"Vision model '{model}' not available. Available models: {', '.join(available_models)}"], "analyzed_images": []}
+    except Exception as e:
+        # Don't fail vision analysis completely, just log the error and continue
+        print(f"Warning: Could not check model availability: {str(e)}")
+        # Continue with analysis anyway
+    
+    for i, img_url in enumerate(images[:3]):  # Reduced from 5 to 3 images for faster analysis
         try:
-            prompt = "Describe this image and check for gambling symbols, illegal content, or malicious elements."
-            response = ollama.generate(model=model, prompt=prompt, images=[img_url])
-            results.append(response['response'])
+            print(f"Analyzing image {i+1}/{min(3, len(images))}: {img_url}")
+            
+            # Download image first with reduced timeout
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(img_url, stream=True, timeout=8, headers=headers)  # Reduced from 15s to 8s
+            response.raise_for_status()
+            
+            # Check if it's actually an image
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('image/'):
+                results.append(f"Skipped non-image content: {img_url}")
+                continue
+            
+            # Save temporarily
+            import tempfile
+            import base64
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    tmp_file.write(chunk)
+                tmp_path = tmp_file.name
+            
+            try:
+                # Read image as base64 for Ollama
+                with open(tmp_path, 'rb') as img_file:
+                    img_data = base64.b64encode(img_file.read()).decode('utf-8')
+                
+                prompt = """Analyze this image for security concerns. Look for:
+- Gambling symbols, casino elements, betting interfaces
+- Adult or inappropriate content
+- Phishing attempts or fake login forms
+- Malicious download buttons or suspicious links
+- Illegal content indicators
+- Scam or fraud indicators
+- Suspicious visual elements that could deceive users
+
+Provide a brief security assessment."""
+                
+                print(f"Sending image to Ollama model: {model}")
+                response = ollama.generate(model=model, prompt=prompt, images=[img_data])
+                analysis_result = response['response']
+                results.append(f"Image {i+1}: {analysis_result}")
+                analyzed_images.append({"url": img_url, "analysis": analysis_result})
+                print(f"Vision analysis complete for image {i+1}")
+                
+            finally:
+                # Clean up temp file
+                import os
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+                    
+        except requests.exceptions.RequestException as e:
+            results.append(f"Failed to download image {i+1} ({img_url}): {str(e)}")
         except Exception as e:
-            results.append(f"Error analyzing image: {str(e)}")
-    return results
+            results.append(f"Error analyzing image {i+1} ({img_url}): {str(e)}")
+    
+    return {
+        "results": results if results else ["No images could be analyzed"],
+        "analyzed_images": analyzed_images
+    }
 
 def judge_evidence(text_result, vision_results, url, server_info, shadowdoor_links, vulnerabilities, model):
-    evidence = f"Text: {text_result}\nVision: {'; '.join(vision_results)}\nServer Info: {json.dumps(server_info)}\nShadowdoor Links: {json.dumps(shadowdoor_links)}\nVulnerabilities: {json.dumps(vulnerabilities)}"
+    # Handle vision_results whether it's the old format (list) or new format (dict)
+    if isinstance(vision_results, dict):
+        vision_text = '; '.join(vision_results.get('results', []))
+    else:
+        vision_text = '; '.join(vision_results) if vision_results else ''
+    
+    evidence = f"Text: {text_result}\nVision: {vision_text}\nServer Info: {json.dumps(server_info)}\nShadowdoor Links: {json.dumps(shadowdoor_links)}\nVulnerabilities: {json.dumps(vulnerabilities)}"
     prompt = f"Based on evidence from text, vision analysis, server information, shadowdoor detection, and vulnerability analysis of {url}, provide a structured judgment:\n- Confidence Score (0-100, where 0 is very safe and 100 is very dangerous)\n- Detailed Result (malicious/safe)\n- Website Weaknesses (e.g., outdated software, missing security headers like HTTPS, HSTS, CSP, X-Frame-Options)\n- Security Vulnerabilities (potential XSS, SQL injection, CSRF indicators)\n- Shadowdoor/Defacement Detection (links to illegal content, malicious domains)\n- Domain/IP Address: {server_info.get('ip_address', 'Unknown')}\n- Server Version: {server_info.get('server', 'Unknown')}\n- Content Analysis: Check for malicious scripts, phishing elements, or illegal content\n- Recommendations (only for detailed view)"
     try:
         response = ollama.generate(model=model, prompt=prompt + '\n\n' + evidence)
@@ -435,7 +532,6 @@ def judge_evidence(text_result, vision_results, url, server_info, shadowdoor_lin
 
 def scan_site(url):
     """Scan a single site: fetch content, analyze with AI, return analysis results."""
-    global scan_cache
     current_scanning.append(url)
     emit_progress()
     
@@ -449,19 +545,20 @@ def scan_site(url):
     }
     socketio.emit('scan_update', emit_data)
     
-    # Check cache first
-    if url in scan_cache:
-        cache_entry = scan_cache[url]
-        cache_time = cache_entry.get('timestamp', 0)
-        if time.time() - cache_time < 3600:  # Cache for 1 hour
-            result = cache_entry['result']
-            result['cached'] = True
+    # Check database cache first
+    cached_result = db.get_scan_result(url)
+    if cached_result and config.get_database_config()['enable_cache']:
+        cache_time = datetime.fromisoformat(cached_result['updated_at'])
+        cache_duration = config.get_database_config()['cache_duration_hours']
+        if (datetime.now() - cache_time).total_seconds() < (cache_duration * 3600):
+            cached_result['cached'] = True
             current_scanning.remove(url) if url in current_scanning else None
-            return result
+            return cached_result
     
     try:
         start_time_req = time.time()
-        response = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        response = requests.get(url, timeout=config.get_scanning_config()['request_timeout'], 
+                              headers={'User-Agent': config.get_scanning_config()['user_agent']})
         response_time = time.time() - start_time_req
         
         # Check for redirects
@@ -482,15 +579,33 @@ def scan_site(url):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         text_content = soup.get_text()
-        images = [img['src'] for img in soup.find_all('img') if 'src' in img.attrs and img['src'].startswith('http')]
+        
+        # Extract images with better URL handling
+        images = []
+        from urllib.parse import urljoin
+        for img in soup.find_all('img'):
+            if 'src' in img.attrs:
+                img_src = img['src']
+                # Convert relative URLs to absolute URLs
+                if img_src.startswith('http'):
+                    images.append(img_src)
+                elif img_src.startswith('/') or img_src.startswith('./'):
+                    absolute_url = urljoin(url, img_src)
+                    images.append(absolute_url)
+        
+        images = images[:10]  # Limit to first 10 images
         js_scripts = [script.get_text() for script in soup.find_all('script') if script.get_text()]
         
         # Detect anti-crawler techniques
         anti_crawler_indicators = detect_anti_crawler(response.text, js_scripts)
         
-        # If content is suspiciously low or anti-crawler detected, try Selenium
+        # Smart Selenium usage - only when really needed
         use_selenium = False
-        if len(text_content.strip()) < 100 or anti_crawler_indicators:
+        content_suspicious = len(text_content.strip()) < 100
+        has_heavy_js = len(js_scripts) > 5 or any(len(script) > 5000 for script in js_scripts)
+        
+        # Only use Selenium if content is suspicious AND has heavy JS (likely needs rendering)
+        if content_suspicious and has_heavy_js and anti_crawler_indicators:
             selenium_data = fetch_with_selenium(url)
             if selenium_data:
                 text_content = selenium_data['text_content']
@@ -539,33 +654,69 @@ def scan_site(url):
         # Analyze vulnerabilities
         vulnerabilities = analyze_vulnerabilities(response.text, server_info, url)
         
+        # Intelligence gathering
+        domain_intelligence = {}
+        if config.get_intelligence_config()['whois_enabled'] or config.get_intelligence_config()['dns_analysis_enabled']:
+            try:
+                domain_analysis = intelligence.comprehensive_domain_analysis(url)
+                domain_intelligence = {
+                    'domain': domain_analysis['domain'],
+                    'whois_data': domain_analysis['whois'],
+                    'dns_data': domain_analysis['dns'],
+                    'geolocation_data': domain_analysis['geolocation'],
+                    'risk_score': domain_analysis['overall_risk_score'],
+                    'risk_factors': domain_analysis['risk_factors'],
+                    'recommendations': domain_analysis['recommendations']
+                }
+                
+                # Save domain intelligence to database
+                if domain_analysis['whois'].get('success'):
+                    whois_data = domain_analysis['whois']['data']
+                    db.save_domain_intelligence(
+                        domain_analysis['domain'],
+                        whois_data,
+                        domain_analysis['dns']['data'] if domain_analysis['dns'].get('success') else {},
+                        whois_data.get('creation_date'),
+                        whois_data.get('registrar'),
+                        whois_data.get('domain_age_days')
+                    )
+                
+            except Exception as e:
+                logging.error(f"Intelligence gathering failed for {url}: {e}")
+        
         # AI Analysis
         text_result, new_keywords = analyze_text(text_content, OLLAMA_MODELS['text'])
-        vision_results = analyze_images(images, OLLAMA_MODELS['vision'])
+        vision_analysis = analyze_images(images, OLLAMA_MODELS['vision'])
+        vision_results = vision_analysis.get("results", []) if isinstance(vision_analysis, dict) else vision_analysis
+        analyzed_images = vision_analysis.get("analyzed_images", []) if isinstance(vision_analysis, dict) else []
         
         result = {
             'url': url, 
             'text_result': text_result, 
             'vision_results': vision_results, 
+            'analyzed_images': analyzed_images,
             'new_keywords': new_keywords,
             'server_info': server_info,
             'shadowdoor_links': shadowdoor_links,
-            'vulnerabilities': vulnerabilities
+            'vulnerabilities': vulnerabilities,
+            'domain_intelligence': domain_intelligence
         }
-        # Cache the result
-        scan_cache[url] = {'result': result, 'timestamp': time.time()}
+        
+        # Save to database
+        db.save_scan_result(result)
+        
         return result
     except Exception as e:
         result = {'url': url, 'error': str(e)}
-        # Cache the result
-        scan_cache[url] = {'result': result, 'timestamp': time.time()}
+        # Save error result to database
+        db.save_scan_result(result)
         return result
     finally:
         current_scanning.remove(url) if url in current_scanning else None
 
-def parallel_scan(sites, max_workers=3):
+def parallel_scan(sites, max_workers=8):  # Increased from 3 to 8 for faster processing
     """Scan multiple sites in parallel for analysis, then judge sequentially."""
-    global scanned_count, potential_count, dangerous_count, scan_results, current_scanning, start_time, stop_scan, is_scanning
+    global scanned_count, potential_count, dangerous_count, scan_results, current_scanning, start_time, stop_scan, is_scanning, total_sites, total_scanning_sites
     analysis_results = []
     start_time = time.time()
     
@@ -671,6 +822,17 @@ def parallel_scan(sites, max_workers=3):
             elif 'potential' in judgment or 'suspicious' in judgment:
                 potential_count += 1
             
+            # Increment scanned count for each completed scan
+            scanned_count += 1
+            
+            # Emit dashboard counter updates in real-time
+            socketio.emit('dashboard_update', {
+                'scanned': scanned_count,
+                'potential': potential_count, 
+                'dangerous': dangerous_count,
+                'found': total_sites
+            })
+            
             # Emit final update
             emit_data = {
                 'url': result['url'], 
@@ -683,145 +845,738 @@ def parallel_scan(sites, max_workers=3):
                 'vulnerabilities': result.get('vulnerabilities', [])
             }
             socketio.emit('scan_update', emit_data)
+            emit_progress()  # Emit progress after each completion
     
     scan_results.extend(analysis_results)
-    save_scan_results()  # Save results after scan completes
+    # No need to save results here - they're saved individually in scan_site
+    # save_scan_results()  # Save results after scan completes
     is_scanning = False
     socketio.emit('scan_status', {'scanning': False})
 
 @app.route('/')
 def home():
-    html = """
+    html = r"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>C.A.K.R.A. Control Panel</title>
+        <title>C.A.K.R.A. Security Scanner</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
-            .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-            h1 { color: #333; text-align: center; }
-            form { margin-bottom: 20px; display: flex; flex-direction: column; }
-            textarea { width: 100%; height: 100px; margin-bottom: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-            .form-row label { margin-right: 10px; }
-            .form-row input { padding: 5px; border: 1px solid #ccc; border-radius: 4px; }
-            #domainCheckboxes { display: flex; flex-wrap: wrap; gap: 10px; }
-            #domainCheckboxes label { display: flex; align-items: center; margin: 0; }
-            button { padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-            button:hover { background-color: #0056b3; }
-            .counters { display: flex; justify-content: space-around; margin-bottom: 20px; }
-            .counter { text-align: center; padding: 10px; border-radius: 4px; }
-            .scanned { background-color: #17a2b8; color: white; }
-            .potential { background-color: #ffc107; color: black; }
-            .dangerous { background-color: #dc3545; color: white; }
-            .status-summary { margin-bottom: 20px; text-align: center; font-weight: bold; }
-            #filters input, #filters select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-            th:nth-child(1), td:nth-child(1) { width: 25%; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* URL */
-            th:nth-child(2), td:nth-child(2) { width: 10%; }  /* Confidence */
-            th:nth-child(3), td:nth-child(3) { width: 25%; } /* Judgment */
-            th:nth-child(4), td:nth-child(4) { width: 20%; } /* Text Analysis */
-            th:nth-child(5), td:nth-child(5) { width: 20%; } /* Vision Analysis */
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; overflow-wrap: break-word; vertical-align: top; }
-            th { background-color: #f2f2f2; }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                color: #333;
+            }
+            .header {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                padding: 1.5rem 2rem;
+                box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+                border-bottom: 1px solid rgba(255,255,255,0.2);
+                text-align: center;
+            }
+            .header h1 {
+                color: #2c3e50;
+                font-size: 2.2rem;
+                font-weight: 600;
+                margin: 0;
+            }
+            .header .subtitle {
+                color: #7f8c8d;
+                font-size: 1rem;
+                margin-top: 0.5rem;
+                font-weight: 400;
+            }
+            .system-note {
+                background: rgba(255, 193, 7, 0.1);
+                border: 1px solid rgba(255, 193, 7, 0.3);
+                border-radius: 8px;
+                padding: 0.75rem 1rem;
+                margin-top: 1rem;
+                color: #856404;
+                font-size: 0.9rem;
+                display: ${SELENIUM_AVAILABLE ? 'none' : 'block'};
+            }
+            .container {
+                max-width: 1400px;
+                margin: 2rem auto;
+                padding: 0 2rem;
+                display: grid;
+                gap: 2rem;
+                grid-template-columns: 1fr;
+            }
+            /* Dashboard Components */
+            .dashboard-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 1.5rem;
+                margin-bottom: 2rem;
+            }
+            .card {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                padding: 1.5rem;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+                border: 1px solid rgba(255,255,255,0.2);
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            .card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+            }
+            .counter-card {
+                text-align: center;
+                position: relative;
+                overflow: hidden;
+            }
+            .counter-card::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 4px;
+                background: var(--accent-color);
+            }
+            .counter-card.scanned { --accent-color: #3498db; }
+            .counter-card.potential { --accent-color: #f39c12; }
+            .counter-card.dangerous { --accent-color: #e74c3c; }
+            .counter-card.found { --accent-color: #9b59b6; }
+            .counter-number {
+                font-size: 2.5rem;
+                font-weight: bold;
+                color: var(--accent-color);
+                margin-bottom: 0.5rem;
+            }
+            .counter-label {
+                color: #7f8c8d;
+                font-weight: 500;
+                text-transform: uppercase;
+                font-size: 0.85rem;
+                letter-spacing: 1px;
+            }
+            /* Form Styles */
+            .control-panel {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                padding: 2rem;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+            .control-panel h3 {
+                color: #2c3e50;
+                margin-bottom: 1.5rem;
+                font-size: 1.3rem;
+                font-weight: 600;
+            }
+            textarea {
+                width: 100%;
+                min-height: 120px;
+                padding: 1rem;
+                border: 2px solid #ecf0f1;
+                border-radius: 8px;
+                font-family: 'Consolas', monospace;
+                font-size: 0.9rem;
+                resize: vertical;
+                transition: border-color 0.3s ease;
+                background: #fafbfc;
+            }
+            textarea:focus {
+                outline: none;
+                border-color: #3498db;
+                background: white;
+            }
+            .form-section {
+                margin: 1.5rem 0;
+            }
+            .form-section label {
+                display: block;
+                margin-bottom: 0.75rem;
+                font-weight: 600;
+                color: #2c3e50;
+            }
+            .domain-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+                gap: 0.75rem;
+                margin-top: 0.75rem;
+            }
+            .domain-checkbox {
+                display: flex;
+                align-items: center;
+                padding: 0.5rem;
+                background: #f8f9fa;
+                border-radius: 6px;
+                transition: background-color 0.2s ease;
+                cursor: pointer;
+            }
+            .domain-checkbox:hover {
+                background: #e9ecef;
+            }
+            .domain-checkbox input {
+                margin-right: 0.5rem;
+                transform: scale(1.1);
+            }
+            .button-group {
+                display: flex;
+                gap: 1rem;
+                margin-top: 2rem;
+                flex-wrap: wrap;
+            }
+            .btn {
+                padding: 0.75rem 1.5rem;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 0.9rem;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+            .btn-primary {
+                background: linear-gradient(135deg, #3498db, #2980b9);
+                color: white;
+            }
+            .btn-primary:hover {
+                background: linear-gradient(135deg, #2980b9, #21618c);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+            }
+            .btn-secondary {
+                background: linear-gradient(135deg, #95a5a6, #7f8c8d);
+                color: white;
+            }
+            .btn-secondary:hover {
+                background: linear-gradient(135deg, #7f8c8d, #6c7b7d);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(149, 165, 166, 0.3);
+            }
+            .btn-accent {
+                background: linear-gradient(135deg, #9b59b6, #8e44ad);
+                color: white;
+            }
+            .btn-accent:hover {
+                background: linear-gradient(135deg, #8e44ad, #7d3c98);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(155, 89, 182, 0.3);
+            }
+            /* Progress Styles */
+            .progress-section {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                padding: 2rem;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+                border: 1px solid rgba(255,255,255,0.2);
+                margin-bottom: 2rem;
+            }
+            .progress-bar-container {
+                background: #ecf0f1;
+                border-radius: 10px;
+                height: 12px;
+                overflow: hidden;
+                margin: 1rem 0;
+            }
+            .progress-bar {
+                height: 100%;
+                background: linear-gradient(90deg, #3498db, #2ecc71);
+                border-radius: 10px;
+                transition: width 0.5s ease;
+                position: relative;
+            }
+            .progress-bar::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+                animation: shimmer 2s infinite;
+            }
+            @keyframes shimmer {
+                0% { transform: translateX(-100%); }
+                100% { transform: translateX(100%); }
+            }
+            .progress-info {
+                display: grid;
+                grid-template-columns: 1fr 1fr 2fr;
+                gap: 1rem;
+                margin-top: 1rem;
+                font-size: 0.9rem;
+                color: #7f8c8d;
+            }
+            
+            .progress-info > div {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                min-width: 0; /* Important for grid items to shrink */
+            }
+            
+            .progress-info #current {
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                display: inline-block;
+                word-break: break-all;
+            }
+            /* Filters */
+            .filters-section {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                padding: 1.5rem;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+                border: 1px solid rgba(255,255,255,0.2);
+                margin-bottom: 2rem;
+            }
+            .filters-grid {
+                display: grid;
+                grid-template-columns: 2fr 1fr;
+                gap: 1rem;
+                align-items: end;
+            }
+            .filters-section input, .filters-section select {
+                padding: 0.75rem;
+                border: 2px solid #ecf0f1;
+                border-radius: 8px;
+                background: #fafbfc;
+                transition: border-color 0.3s ease;
+                font-size: 0.9rem;
+            }
+            .filters-section input:focus, .filters-section select:focus {
+                outline: none;
+                border-color: #3498db;
+                background: white;
+            }
+            /* Table Styles */
+            .results-section {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                border-radius: 12px;
+                padding: 2rem;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+            .table-container {
+                overflow-x: auto;
+                border-radius: 8px;
+                border: 1px solid #ecf0f1;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                background: white;
+            }
+            th {
+                background: linear-gradient(135deg, #34495e, #2c3e50);
+                color: white;
+                padding: 1rem;
+                text-align: left;
+                font-weight: 600;
+                font-size: 0.9rem;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            td {
+                padding: 1rem;
+                border-bottom: 1px solid #ecf0f1;
+                vertical-align: top;
+            }
+            
+            /* URL cell specific styling */
+            td:first-child {
+                max-width: 300px;
+                word-break: break-all;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            
+            /* URL links */
+            .url-link {
+                color: #3498db;
+                text-decoration: none;
+                display: block;
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            
+            .url-link:hover {
+                color: #2980b9;
+                text-decoration: underline;
+            }
+            
+            tr:hover {
+                background: #f8f9fa;
+            }
+            .url-link {
+                color: #3498db;
+                text-decoration: none;
+                font-weight: 500;
+                transition: color 0.2s ease;
+            }
+            .url-link:hover {
+                color: #2980b9;
+                text-decoration: underline;
+            }
+            .status-badge {
+                padding: 0.25rem 0.75rem;
+                border-radius: 20px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .status-safe { background: #d4edda; color: #155724; }
+            .status-potential { background: #fff3cd; color: #856404; }
+            .status-malicious { background: #f8d7da; color: #721c24; }
+            .status-queued { background: #e2e3e5; color: #383d41; }
+            .status-analyzing { background: #bee5eb; color: #0c5460; }
+            .status-error { background: #f5c6cb; color: #721c24; }
+            /* Table row colors */
             .queued { background-color: #f8f9fa; }
-            .analyzing { background-color: #cce5ff; }
-            .judging { background-color: #fff3cd; }
-            .safe { background-color: #d4edda; }
+            .analyzing { background-color: #e7f3ff; }
+            .judging { background-color: #fff8e1; }
+            .safe { background-color: #e8f5e8; }
             .potential { background-color: #fff3cd; }
-            .malicious { background-color: #f8d7da; }
+            .malicious { background-color: #fdeaea; }
             .error { background-color: #f5c6cb; }
-            .url-link { color: #007bff; text-decoration: none; cursor: pointer; }
-            .url-link:hover { text-decoration: underline; }
-            .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
-            .modal-content { background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 800px; border-radius: 8px; }
-            .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
-            .close:hover { color: black; }
+            /* Modal Styles */
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 1000;
+                left: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                backdrop-filter: blur(5px);
+            }
+            .modal-content {
+                background: white;
+                margin: 5% auto;
+                padding: 2rem;
+                border-radius: 12px;
+                width: 90%;
+                max-width: 800px;
+                max-height: 80vh;
+                overflow-y: auto;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            }
+            .close {
+                color: #aaa;
+                float: right;
+                font-size: 28px;
+                font-weight: bold;
+                cursor: pointer;
+                transition: color 0.2s ease;
+            }
+            .close:hover { color: #333; }
             .detail-section { margin-bottom: 15px; }
             .detail-label { font-weight: bold; color: #333; }
             .server-info { background-color: #f8f9fa; padding: 10px; border-radius: 4px; margin-top: 10px; }
+            .feedback-buttons { margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap; }
+            .feedback-btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
+            .feedback-btn.correct { background-color: #28a745; color: white; }
+            .feedback-btn.incorrect { background-color: #dc3545; color: white; }
+            .feedback-btn.false-positive { background-color: #ffc107; color: #212529; }
+            .feedback-btn.false-negative { background-color: #fd7e14; color: white; }
+            .feedback-btn.unsure { background-color: #6c757d; color: white; }
+            .feedback-btn:hover { opacity: 0.8; }
+            .intelligence-section { background-color: #e9ecef; padding: 10px; border-radius: 4px; margin-top: 10px; }
+            .risk-score { font-size: 18px; font-weight: bold; color: #dc3545; }
+            .risk-score.low { color: #28a745; }
+            .risk-score.medium { color: #ffc107; }
+            .analytics-section { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
+            .analytics-section h3 { margin-top: 0; color: #333; }
+            .stat-card { display: inline-block; padding: 10px 15px; margin: 5px; background: #f8f9fa; border-radius: 4px; text-align: center; }
+            .stat-value { font-size: 24px; font-weight: bold; color: #007bff; }
+            .stat-label { font-size: 12px; color: #666; }
+            /* Responsive Design */
+            @media (max-width: 1200px) {
+                .dashboard-grid { grid-template-columns: 1fr 1fr; }
+            }
+            @media (max-width: 768px) {
+                .container { padding: 0 1rem; margin: 1rem auto; }
+                .dashboard-grid { grid-template-columns: 1fr; }
+                .filters-grid { grid-template-columns: 1fr; }
+                .button-group { flex-direction: column; }
+                .domain-grid { grid-template-columns: 1fr 1fr; }
+                .header { padding: 1rem; }
+                .header h1 { font-size: 1.8rem; }
+            }
+            
+            /* Analyzed Images Gallery Styles */
+            .analyzed-images-gallery {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+                margin-top: 12px;
+            }
+            
+            .analyzed-image-item {
+                max-width: 250px;
+                min-width: 200px;
+                border: 1px solid rgba(220, 220, 220, 0.8);
+                border-radius: 12px;
+                padding: 12px;
+                background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(249, 249, 249, 0.95));
+                backdrop-filter: blur(10px);
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+                transition: all 0.3s ease;
+            }
+            
+            .analyzed-image-item:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+                border-color: rgba(0, 123, 255, 0.3);
+            }
+            
+            .analyzed-image-item img {
+                width: 100%;
+                height: auto;
+                max-height: 180px;
+                object-fit: cover;
+                border-radius: 8px;
+                margin-bottom: 10px;
+                border: 1px solid rgba(0, 0, 0, 0.1);
+                transition: transform 0.3s ease;
+            }
+            
+            .analyzed-image-item img:hover {
+                transform: scale(1.02);
+            }
+            
+            .analyzed-image-item .image-url {
+                font-size: 11px;
+                color: #666;
+                word-break: break-all;
+                margin-bottom: 8px;
+                line-height: 1.3;
+            }
+            
+            .analyzed-image-item .image-url a {
+                color: #007bff;
+                text-decoration: none;
+                transition: color 0.3s ease;
+            }
+            
+            .analyzed-image-item .image-url a:hover {
+                color: #0056b3;
+                text-decoration: underline;
+            }
+            
+            .analyzed-image-item .image-analysis {
+                font-size: 13px;
+                color: #333;
+                background: linear-gradient(135deg, rgba(232, 244, 253, 0.9), rgba(225, 245, 254, 0.9));
+                padding: 8px;
+                border-radius: 6px;
+                border-left: 3px solid #007bff;
+                line-height: 1.4;
+            }
+            
+            .image-error-placeholder {
+                padding: 30px;
+                background: linear-gradient(135deg, rgba(245, 245, 245, 0.9), rgba(240, 240, 240, 0.9));
+                border-radius: 8px;
+                text-align: center;
+                color: #666;
+                font-size: 14px;
+                border: 2px dashed #ddd;
+            }
+            
+            @media (max-width: 768px) {
+                .analyzed-images-gallery {
+                    flex-direction: column;
+                }
+                .analyzed-image-item {
+                    max-width: 100%;
+                    min-width: auto;
+                }
+            }
         </style>
     </head>
     <body>
+        <div class="header">
+            <h1>🛡️ C.A.K.R.A. Security Scanner</h1>
+            <p class="subtitle">Comprehensive Analysis and Knowledge Risk Assessment</p>
+            <div class="system-note">
+                ⚠️ Advanced detection features limited - Selenium not available. Using basic pattern detection.
+            </div>
+        </div>
+        
         <div class="container">
-            <h1>C.A.K.R.A. Control Panel</h1>
-            ${SELENIUM_AVAILABLE ? '' : '<p style="color: orange;">Note: Selenium not installed. Anti-crawler detection limited to basic patterns.</p>'}
-            <div class="counters">
-                <div class="counter scanned" id="scanned">0 Web Scanned</div>
-                <div class="counter potential" id="potential">0 Web Potential Dangerous</div>
-                <div class="counter dangerous" id="dangerous">0 Web Dangerous</div>
-                <div class="counter" id="found">0 Websites Found</div>
-            </div>
-            <div class="status-summary">
-                <p id="statusSummary">Ready to scan</p>
-            </div>
-            <div id="progress">
-                <p>Progress: <span id="percentage">0</span>% (<span id="completed">0</span>/<span id="total">0</span> sites)</p>
-                <p>Estimated Time Remaining: <span id="eta">0</span> seconds</p>
-                <p>Currently Scanning: <span id="current"></span></p>
-                <div id="progressBar" style="width: 100%; background-color: #f0f0f0; border-radius: 5px; margin-top: 10px;">
-                    <div id="progressFill" style="width: 0%; height: 20px; background-color: #007bff; border-radius: 5px; transition: width 0.3s;"></div>
+            <!-- Dashboard Stats -->
+            <div class="dashboard-grid">
+                <div class="card counter-card scanned">
+                    <div class="counter-number" id="scanned">0</div>
+                    <div class="counter-label">Scanned</div>
+                </div>
+                <div class="card counter-card potential">
+                    <div class="counter-number" id="potential">0</div>
+                    <div class="counter-label">Potential Risk</div>
+                </div>
+                <div class="card counter-card dangerous">
+                    <div class="counter-number" id="dangerous">0</div>
+                    <div class="counter-label">High Risk</div>
+                </div>
+                <div class="card counter-card found">
+                    <div class="counter-number" id="found">0</div>
+                    <div class="counter-label">Sites Found</div>
                 </div>
             </div>
-            <form id="scanForm">
-                <textarea name="urls" placeholder="https://example.com\nhttps://another.com"></textarea>
-                <div class="form-row">
-                    <label>Scan Indonesian Domains:</label>
-                    <div id="domainCheckboxes">
-                        <label><input type="checkbox" name="domains" value=".id"> .id</label>
-                        <label><input type="checkbox" name="domains" value=".go.id"> .go.id</label>
-                        <label><input type="checkbox" name="domains" value=".ac.id"> .ac.id</label>
-                        <label><input type="checkbox" name="domains" value=".co.id"> .co.id</label>
-                        <label><input type="checkbox" name="domains" value=".or.id"> .or.id</label>
-                        <label><input type="checkbox" name="domains" value=".net.id"> .net.id</label>
-                        <label><input type="checkbox" name="domains" value=".web.id"> .web.id</label>
-                        <label><input type="checkbox" name="domains" value=".sch.id"> .sch.id</label>
-                        <label><input type="checkbox" name="domains" value=".mil.id"> .mil.id</label>
-                        <label><input type="checkbox" name="domains" value=".edu"> .edu</label>
-                        <label><input type="checkbox" name="domains" value=".gov.id"> .gov.id</label>
-                        <label><input type="checkbox" name="domains" value=".com"> .com</label>
-                        <label><input type="checkbox" name="domains" value=".org"> .org</label>
-                        <label><input type="checkbox" name="domains" value=".net"> .net</label>
+
+            <!-- Progress Section -->
+            <div class="progress-section" id="progress" style="display: none;">
+                <h3>📊 Scan Progress</h3>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressFill" style="width: 0%;"></div>
+                </div>
+                <div class="progress-info">
+                    <div><strong>Progress:</strong> <span id="percentage">0</span>% (<span id="completed">0</span>/<span id="total">0</span>)</div>
+                    <div><strong>ETA:</strong> <span id="eta">0</span> seconds</div>
+                    <div><strong>Current:</strong> <span id="current">Ready</span></div>
+                </div>
+                <div style="text-align: center; margin-top: 1rem;">
+                    <p id="statusSummary" style="font-weight: 600; color: #2c3e50;">Ready to scan</p>
+                </div>
+            </div>
+
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <h3>🎯 Scan Configuration</h3>
+                <form id="scanForm">
+                    <div class="form-section">
+                        <label for="urls">🌐 Target URLs (one per line):</label>
+                        <textarea name="urls" id="urls" placeholder="https://example.com&#10;https://another-site.com&#10;&#10;Enter URLs to scan for security threats..."></textarea>
+                    </div>
+                    
+                    <div class="form-section">
+                        <label>🔍 Domain Discovery & Search:</label>
+                        <div class="domain-grid">
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".id"> .id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".go.id"> .go.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".ac.id"> .ac.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".co.id"> .co.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".or.id"> .or.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".net.id"> .net.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".web.id"> .web.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".sch.id"> .sch.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".mil.id"> .mil.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".edu"> .edu</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".gov.id"> .gov.id</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".com"> .com</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".org"> .org</label>
+                            <label class="domain-checkbox"><input type="checkbox" name="domains" value=".net"> .net</label>
+                        </div>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button type="submit" class="btn btn-primary" id="scanButton">
+                            🚀 Start Security Scan
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="exportButton">
+                            📄 Export PDF Report
+                        </button>
+                        <button type="button" class="btn btn-accent" id="analyticsButton">
+                            📊 View Analytics
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Filters -->
+            <div class="filters-section">
+                <h3>🔍 Filter Results</h3>
+                <div class="filters-grid">
+                    <div>
+                        <label>Search URLs:</label>
+                        <input type="text" id="searchInput" placeholder="Search by URL, domain, or content...">
+                    </div>
+                    <div>
+                        <label>Filter by Status:</label>
+                        <select id="judgmentFilter">
+                            <option value="">All Results</option>
+                            <option value="Queued">⏳ Queued</option>
+                            <option value="Analyzing in Progress">🔄 Analyzing</option>
+                            <option value="Judging in Progress">⚖️ Judging</option>
+                            <option value="Safe">✅ Safe</option>
+                            <option value="Potential">⚠️ Potential Risk</option>
+                            <option value="Malicious">🚨 High Risk</option>
+                            <option value="Error">❌ Error</option>
+                        </select>
                     </div>
                 </div>
-                <button type="submit" id="scanButton">Start Scan</button>
-            <button type="button" id="exportButton">Export to CSV</button>
-            </form>
-            <div id="status"></div>
-            <div id="filters">
-                <input type="text" id="searchInput" placeholder="Search URLs...">
-                <select id="judgmentFilter">
-                    <option value="">All Judgments</option>
-                    <option value="Queued">Queued</option>
-                    <option value="Analyzing in Progress">Analyzing in Progress</option>
-                    <option value="Judging in Progress">Judging in Progress</option>
-                    <option value="Safe">Safe</option>
-                    <option value="Potential">Potential</option>
-                    <option value="Malicious">Malicious</option>
-                    <option value="Error">Error</option>
-                </select>
             </div>
-            <div id="results">
-                <table id="resultsTable">
-                    <thead>
-                        <tr>
-                            <th>URL</th>
-                            <th>Confidence</th>
-                            <th>Judgment</th>
-                            <th>Text Analysis</th>
-                            <th>Vision Analysis</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+
+            <!-- Results -->
+            <div class="results-section">
+                <h3>📊 Scan Results</h3>
+                <div class="table-container">
+                    <table id="resultsTable">
+                        <thead>
+                            <tr>
+                                <th>🌐 URL</th>
+                                <th>📊 Confidence</th>
+                                <th>⚖️ Security Status</th>
+                                <th>📝 Text Analysis</th>
+                                <th>👁️ Vision Analysis</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
-            
-            <!-- Modal for URL details -->
+        </div>
+        
+        <!-- Modal for URL details -->
             <div id="urlModal" class="modal">
                 <div class="modal-content">
                     <span class="close">&times;</span>
                     <h2>Website Details</h2>
                     <div id="modalContent"></div>
+                </div>
+            </div>
+            
+            <!-- Modal for Analytics -->
+            <div id="analyticsModal" class="modal">
+                <div class="modal-content" style="max-width: 1000px;">
+                    <span class="close" onclick="closeAnalyticsModal()">&times;</span>
+                    <h2>Analytics Dashboard</h2>
+                    <div id="analyticsContent">
+                        <div class="analytics-section">
+                            <h3>Overall Statistics</h3>
+                            <div id="overallStats"></div>
+                        </div>
+                        <div class="analytics-section">
+                            <h3>AI Performance</h3>
+                            <div id="aiPerformance"></div>
+                        </div>
+                        <div class="analytics-section">
+                            <h3>Top Domains</h3>
+                            <div id="topDomains"></div>
+                        </div>
+                        <div class="analytics-section">
+                            <h3>Recent Activity</h3>
+                            <div id="recentActivity"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -843,39 +1598,63 @@ def home():
             socket.on('scan_status', function(data) {
                 const button = document.getElementById('scanButton');
                 const statusSummary = document.getElementById('statusSummary');
+                const progressSection = document.getElementById('progress');
+                
                 if (data.scanning) {
                     button.textContent = 'Stop Scan';
                     statusSummary.textContent = 'Scanning in progress...';
+                    progressSection.style.display = 'block';
                 } else {
                     button.textContent = 'Start Scan';
                     statusSummary.textContent = 'Scan completed or stopped';
+                    progressSection.style.display = 'none';
                 }
             });
             
             socket.on('progress', function(data) {
                 document.getElementById('percentage').textContent = data.percentage;
                 document.getElementById('eta').textContent = data.eta;
-                document.getElementById('current').textContent = data.current_scanning.join(', ');
+                // Truncate long URLs in current scanning display
+                const currentUrls = data.current_scanning.map(url => {
+                    if (url.length > 50) {
+                        return url.substring(0, 47) + '...';
+                    }
+                    return url;
+                });
+                document.getElementById('current').textContent = currentUrls.join(', ');
                 document.getElementById('progressFill').style.width = data.percentage + '%';
                 document.getElementById('completed').textContent = data.completed || 0;
                 document.getElementById('total').textContent = data.total || 0;
             });
             
             socket.on('total_sites', function(count) {
-                document.getElementById('found').textContent = count + ' Websites Found';
+                document.getElementById('found').textContent = count;
                 document.getElementById('total').textContent = count;
+            });
+            
+            socket.on('dashboard_update', function(data) {
+                // Update dashboard counters in real-time during scanning
+                scanned = data.scanned;
+                potential = data.potential;
+                dangerous = data.dangerous;
+                scannedDiv.textContent = scanned;
+                potentialDiv.textContent = potential;
+                dangerousDiv.textContent = dangerous;
+                document.getElementById('found').textContent = data.found;
             });
             
             socket.on('reset', function() {
                 scanned = 0;
                 potential = 0;
                 dangerous = 0;
-                scannedDiv.textContent = '0 Web Scanned';
-                potentialDiv.textContent = '0 Web Potential Dangerous';
-                dangerousDiv.textContent = '0 Web Dangerous';
+                scannedDiv.textContent = '0';
+                potentialDiv.textContent = '0';
+                dangerousDiv.textContent = '0';
+                document.getElementById('found').textContent = '0';
                 document.getElementById('percentage').textContent = '0';
                 document.getElementById('eta').textContent = '0';
-                document.getElementById('current').textContent = '';
+                document.getElementById('current').textContent = 'Ready';
+                document.getElementById('progress').style.display = 'block';
                 resultsTable.innerHTML = '';
                 // Request initial state to repopulate with existing results
                 socket.emit('request_initial');
@@ -889,39 +1668,43 @@ def home():
                     // If previously queued, now analyzed, increment scanned
                     if (existingRow.cells[2].innerHTML === 'Queued' && data.judgment !== 'Queued') {
                         scanned++;
-                        scannedDiv.textContent = scanned + ' Web Scanned';
-                        // Parse judgment for counters
-                        const judgment = data.judgment.toLowerCase();
+                        scannedDiv.textContent = scanned;
+                        // Parse judgment for counters with null safety
+                        const judgment = (data.judgment || '').toLowerCase();
                         if (judgment.includes('malicious') || judgment.includes('dangerous')) {
                             dangerous++;
-                            dangerousDiv.textContent = dangerous + ' Web Dangerous';
+                            dangerousDiv.textContent = dangerous;
                         } else if (judgment.includes('potential') || judgment.includes('suspicious')) {
                             potential++;
-                            potentialDiv.textContent = potential + ' Web Potential Dangerous';
+                            potentialDiv.textContent = potential;
                         }
                     }
-                    // Update row
+                    // Update row with safe judgment handling
+                    const safeJudgment = data.judgment || 'Unknown';
                     existingRow.cells[1].innerHTML = data.confidence || 'N/A';
-                    existingRow.cells[2].innerHTML = data.judgment;
+                    existingRow.cells[2].innerHTML = safeJudgment;
                     // Simplify display for table
-                    let textDisplay = data.judgment === 'Queued' ? 'Queued' : (data.judgment === 'Error' ? 'Error' : 'Done');
-                    let visionDisplay = data.judgment === 'Queued' ? 'Queued' : (data.judgment === 'Error' ? 'Error' : 'Done');
+                    let textDisplay = safeJudgment === 'Queued' ? 'Queued' : (safeJudgment === 'Error' ? 'Error' : 'Done');
+                    let visionDisplay = safeJudgment === 'Queued' ? 'Queued' : (safeJudgment === 'Error' ? 'Error' : 'Done');
                     existingRow.cells[3].innerHTML = textDisplay;
                     existingRow.cells[4].innerHTML = visionDisplay;
-                    let rowClass = data.judgment.toLowerCase().replace(/\s+/g, '').replace('inprogress', '');
+                    let rowClass = safeJudgment.toLowerCase().replace(/\s+/g, '').replace('inprogress', '');
                     existingRow.className = rowClass;
+                    existingRow.dataset.judgment = safeJudgment;  // Update dataset for filtering
                 } else {
-                    // Create new row
+                    // Create new row with safe judgment handling
                     const row = document.createElement('tr');
+                    const safeJudgment = data.judgment || 'Unknown';
                     // Simplify display for table
-                    let textDisplay = data.judgment === 'Queued' ? 'Queued' : (data.judgment === 'Error' ? 'Error' : 'Done');
-                    let visionDisplay = data.judgment === 'Queued' ? 'Queued' : (data.judgment === 'Error' ? 'Error' : 'Done');
-                    let rowClass = data.judgment.toLowerCase().replace(/\s+/g, '').replace('inprogress', '');
+                    let textDisplay = safeJudgment === 'Queued' ? 'Queued' : (safeJudgment === 'Error' ? 'Error' : 'Done');
+                    let visionDisplay = safeJudgment === 'Queued' ? 'Queued' : (safeJudgment === 'Error' ? 'Error' : 'Done');
+                    let rowClass = safeJudgment.toLowerCase().replace(/\s+/g, '').replace('inprogress', '');
                     row.className = rowClass;
+                    row.dataset.judgment = safeJudgment;  // Set dataset for filtering
                     row.innerHTML = `
-                        <td><a href="#" class="url-link" data-url="${data.url}">${data.url}</a></td>
+                        <td><a href="#" class="url-link" data-url="${data.url || ''}">${data.url || 'Unknown URL'}</a></td>
                         <td>${data.confidence || 'N/A'}</td>
-                        <td>${data.judgment}</td>
+                        <td>${safeJudgment}</td>
                         <td>${textDisplay}</td>
                         <td>${visionDisplay}</td>
                     `;
@@ -944,25 +1727,32 @@ def home():
                 scanned = data.scanned;
                 potential = data.potential;
                 dangerous = data.dangerous;
-                scannedDiv.textContent = scanned + ' Web Scanned';
-                potentialDiv.textContent = potential + ' Web Potential Dangerous';
-                dangerousDiv.textContent = dangerous + ' Web Dangerous';
-                if (data.total_sites !== undefined) {
-                    document.getElementById('found').textContent = data.total_sites + ' Websites Found';
-                }
+                        scannedDiv.textContent = scanned;
+                        potentialDiv.textContent = potential;
+                        dangerousDiv.textContent = dangerous;
+                        // Use the 'found' counter for total discovered sites
+                        if (data.found !== undefined) {
+                            document.getElementById('found').textContent = data.found;
+                        }
+                
+                // Clear existing table first
+                resultsTable.innerHTML = '';
                 
                 // Populate table
                 data.results.forEach(result => {
                     const row = document.createElement('tr');
+                    // Safe judgment handling with null checks
+                    const judgment = result.judgment || 'Unknown';
                     // Simplify display for table
-                    let textDisplay = result.judgment === 'Queued' ? 'Queued' : (result.judgment === 'Error' ? 'Error' : 'Done');
-                    let visionDisplay = result.judgment === 'Queued' ? 'Queued' : (result.judgment === 'Error' ? 'Error' : 'Done');
-                    let rowClass = result.judgment.toLowerCase().replace(/\s+/g, '').replace('inprogress', '');
+                    let textDisplay = judgment === 'Queued' ? 'Queued' : (judgment === 'Error' ? 'Error' : 'Done');
+                    let visionDisplay = judgment === 'Queued' ? 'Queued' : (judgment === 'Error' ? 'Error' : 'Done');
+                    let rowClass = judgment.toLowerCase().replace(/\s+/g, '').replace('inprogress', '');
                     row.className = rowClass;
+                    row.dataset.judgment = judgment;
                     row.innerHTML = `
-                        <td><a href="#" class="url-link" data-url="${result.url}">${result.url}</a></td>
+                        <td><a href="#" class="url-link" data-url="${result.url || ''}">${result.url || 'Unknown URL'}</a></td>
                         <td>${result.confidence || 'N/A'}</td>
-                        <td>${result.judgment}</td>
+                        <td>${judgment}</td>
                         <td>${textDisplay}</td>
                         <td>${visionDisplay}</td>
                     `;
@@ -1055,6 +1845,30 @@ def home():
                     `;
                 }
                 
+                let intelligenceHtml = '';
+                if (data.domain_intelligence) {
+                    const intel = data.domain_intelligence;
+                    const riskClass = intel.risk_score > 70 ? 'high' : intel.risk_score > 40 ? 'medium' : 'low';
+                    intelligenceHtml = `
+                        <div class="detail-section intelligence-section">
+                            <div class="detail-label">🔍 Domain Intelligence:</div>
+                            <div class="risk-score ${riskClass}">Risk Score: ${intel.risk_score}/100</div>
+                            ${intel.risk_factors && intel.risk_factors.length > 0 ? `
+                                <div><strong>Risk Factors:</strong></div>
+                                <ul>
+                                    ${intel.risk_factors.map(factor => `<li>${factor}</li>`).join('')}
+                                </ul>
+                            ` : ''}
+                            ${intel.recommendations && intel.recommendations.length > 0 ? `
+                                <div><strong>Recommendations:</strong></div>
+                                <ul>
+                                    ${intel.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                                </ul>
+                            ` : ''}
+                        </div>
+                    `;
+                }
+                
                 modalContent.innerHTML = `
                     <div class="detail-section">
                         <div class="detail-label">URL:</div>
@@ -1076,9 +1890,40 @@ def home():
                         <div class="detail-label">Vision Analysis:</div>
                         ${data.vision_results ? data.vision_results.join('<br>') : 'No vision analysis available'}
                     </div>
+                    ${data.analyzed_images && data.analyzed_images.length > 0 ? `
+                        <div class="detail-section">
+                            <div class="detail-label">🖼️ Analyzed Images:</div>
+                            <div class="analyzed-images-gallery">
+                                ${data.analyzed_images.map((img, index) => `
+                                    <div class="analyzed-image-item">
+                                        <img src="${img.url}" alt="Analyzed Image ${index + 1}" 
+                                             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                        <div class="image-error-placeholder" style="display: none;">
+                                            ❌ Image not available
+                                        </div>
+                                        <div class="image-url">
+                                            <a href="${img.url}" target="_blank">${img.url}</a>
+                                        </div>
+                                        ${img.analysis ? `<div class="image-analysis"><strong>Analysis:</strong> ${img.analysis}</div>` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
                     ${serverInfoHtml}
                     ${shadowdoorHtml}
                     ${vulnerabilitiesHtml}
+                    ${intelligenceHtml}
+                    <div class="detail-section feedback-buttons">
+                        <div class="detail-label">AI Feedback (helps improve accuracy):</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+                            <button class="feedback-btn correct" onclick="submitDetailedFeedback('${data.url}', 'correct')">Verdict is Correct</button>
+                            <button class="feedback-btn incorrect" onclick="submitDetailedFeedback('${data.url}', 'incorrect')">Verdict is Incorrect</button>
+                            <button class="feedback-btn" style="background-color: #ffc107; color: black;" onclick="submitDetailedFeedback('${data.url}', 'false_positive')">False Positive</button>
+                            <button class="feedback-btn" style="background-color: #17a2b8; color: white;" onclick="submitDetailedFeedback('${data.url}', 'false_negative')">False Negative</button>
+                            <button class="feedback-btn" style="background-color: #6c757d; color: white;" onclick="submitDetailedFeedback('${data.url}', 'unsure')">Unsure</button>
+                        </div>
+                    </div>
                     ${data.error ? `<div class="detail-section"><div class="detail-label">Error:</div><span class="error">${data.error}</span></div>` : ''}
                 `;
                 
@@ -1110,8 +1955,92 @@ def home():
                 });
             });
             
-            document.getElementById('searchInput').addEventListener('input', filterResults);
-            document.getElementById('judgmentFilter').addEventListener('change', filterResults);
+            document.getElementById('analyticsButton').addEventListener('click', showAnalytics);
+            document.getElementById('exportButton').addEventListener('click', function() {
+                window.open('/export_pdf', '_blank');
+            });
+            
+            function showAnalytics() {
+                fetch('/analytics')
+                    .then(response => response.json())
+                    .then(data => {
+                        displayAnalytics(data);
+                        document.getElementById('analyticsModal').style.display = 'block';
+                    })
+                    .catch(error => {
+                        console.error('Error loading analytics:', error);
+                        alert('Error loading analytics data');
+                    });
+            }
+            
+            function closeAnalyticsModal() {
+                document.getElementById('analyticsModal').style.display = 'none';
+            }
+            
+            function displayAnalytics(data) {
+                // Overall Statistics
+                const overallStats = data.overall_stats || {};
+                document.getElementById('overallStats').innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-value">${overallStats.total_scanned || 0}</div>
+                        <div class="stat-label">Total Scanned</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color: #dc3545;">${overallStats.dangerous_count || 0}</div>
+                        <div class="stat-label">Dangerous</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color: #ffc107;">${overallStats.potential_count || 0}</div>
+                        <div class="stat-label">Potential</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color: #28a745;">${overallStats.safe_count || 0}</div>
+                        <div class="stat-label">Safe</div>
+                    </div>
+                `;
+                
+                // AI Performance
+                const feedbackStats = data.feedback_stats || {};
+                document.getElementById('aiPerformance').innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-value">${feedbackStats.total_feedback || 0}</div>
+                        <div class="stat-label">Total Feedback</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color: #28a745;">${(feedbackStats.accuracy_rate || 0).toFixed(1)}%</div>
+                        <div class="stat-label">Accuracy Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${feedbackStats.correct_feedback || 0}</div>
+                        <div class="stat-label">Correct</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color: #dc3545;">${feedbackStats.incorrect_feedback || 0}</div>
+                        <div class="stat-label">Incorrect</div>
+                    </div>
+                `;
+                
+                // Top Domains
+                const domainStats = data.domain_stats || {};
+                let domainHtml = '<table style="width: 100%; border-collapse: collapse;">';
+                domainHtml += '<tr><th style="border: 1px solid #ddd; padding: 8px;">Domain</th><th style="border: 1px solid #ddd; padding: 8px;">Scans</th><th style="border: 1px solid #ddd; padding: 8px;">Avg Confidence</th><th style="border: 1px solid #ddd; padding: 8px;">Risk Level</th></tr>';
+                
+                (domainStats.top_domains || []).slice(0, 10).forEach(domain => {
+                    const riskColor = domain.dangerous_count > domain.total_scans * 0.5 ? '#dc3545' : 
+                                     domain.potential_count > domain.total_scans * 0.3 ? '#ffc107' : '#28a745';
+                    domainHtml += `<tr>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${domain.domain}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${domain.total_scans}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${domain.avg_confidence}%</td>
+                        <td style="border: 1px solid #ddd; padding: 8px; color: ${riskColor};">${domain.dangerous_count > 0 ? 'High' : domain.potential_count > 0 ? 'Medium' : 'Low'}</td>
+                    </tr>`;
+                });
+                domainHtml += '</table>';
+                document.getElementById('topDomains').innerHTML = domainStats.top_domains && domainStats.top_domains.length > 0 ? domainHtml : 'No domain data available';
+                
+                // Recent Activity (placeholder)
+                document.getElementById('recentActivity').innerHTML = '<p>Recent activity chart would be displayed here</p>';
+            }
             
             function filterResults() {
                 const searchTerm = document.getElementById('searchInput').value.toLowerCase();
@@ -1128,6 +2057,68 @@ def home():
                     row.style.display = matchesSearch && matchesJudgment ? '' : 'none';
                 });
             }
+            
+            function submitFeedback(url, feedbackType) {
+                submitDetailedFeedback(url, feedbackType);
+            }
+            
+            function submitDetailedFeedback(url, feedbackType) {
+                const userComment = prompt('Optional comment (helps us improve):', '');
+                
+                fetch('/submit_feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        feedback_type: feedbackType,
+                        user_comment: userComment || '',
+                        detailed_feedback: {
+                            user_agent: navigator.userAgent,
+                            timestamp: new Date().toISOString(),
+                            feedback_source: 'web_ui'
+                        }
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Thank you for your feedback! This helps improve the AI analysis.');
+                    } else {
+                        alert('Error submitting feedback: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error submitting feedback');
+                });
+            }
+            
+            // Add event listeners for search and filter
+            document.getElementById('searchInput').addEventListener('input', filterResults);
+            document.getElementById('judgmentFilter').addEventListener('change', filterResults);
+            
+            // Filter results function
+            function filterResults() {
+                const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+                const judgmentFilter = document.getElementById('judgmentFilter').value;
+                const tableRows = document.querySelectorAll('#resultsTable tbody tr');
+                
+                tableRows.forEach(row => {
+                    const text = row.textContent.toLowerCase();
+                    const judgment = row.dataset.judgment || '';
+                    
+                    const matchesSearch = text.includes(searchTerm);
+                    const matchesJudgment = judgmentFilter === '' || judgment === judgmentFilter;
+                    
+                    if (matchesSearch && matchesJudgment) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+            }
         </script>
     </body>
     </html>
@@ -1136,7 +2127,16 @@ def home():
 
 @app.route('/scan', methods=['POST'])
 def scan():
-    global scan_thread, scanned_count, potential_count, dangerous_count, scan_results, total_sites, stop_scan, is_scanning
+    global scan_thread, scanned_count, potential_count, dangerous_count, scan_results, total_sites, stop_scan, is_scanning, total_scanning_sites
+    
+    # Initialize counters if not already done
+    if 'scanned_count' not in globals():
+        scanned_count = 0
+        potential_count = 0
+        dangerous_count = 0
+        total_sites = 0
+        total_scanning_sites = 0
+    
     if is_scanning:
         stop_scan = True
         is_scanning = False
@@ -1157,20 +2157,21 @@ def scan():
     already_scanned = {result['url'] for result in scan_results}
     new_urls = [url for url in unique_urls if url not in already_scanned]
     
-    total_sites = len(unique_urls)  # Total unique sites found
-    socketio.emit('total_sites', total_sites)
+    total_sites = len(unique_urls)  # Total unique sites found (for "Sites Found" counter)
+    total_scanning_sites = len(new_urls)  # Total new sites to scan (for progress calculation)
+    socketio.emit('total_sites', total_sites)  # Show total found sites
     
     if not new_urls:
         return jsonify({'status': 'All URLs already scanned'})
     
     scanned_count = len(scan_results)  # Start from existing count
     # Recalculate counters from existing results
-    potential_count = sum(1 for result in scan_results if 'potential' in (result.get('judgment', '').lower()) or 'suspicious' in (result.get('judgment', '').lower()))
-    dangerous_count = sum(1 for result in scan_results if 'malicious' in (result.get('judgment', '').lower()) or 'dangerous' in (result.get('judgment', '').lower()))
+    potential_count = sum(1 for result in scan_results if 'potential' in (result.get('judgment') or '').lower() or 'suspicious' in (result.get('judgment') or '').lower())
+    dangerous_count = sum(1 for result in scan_results if 'malicious' in (result.get('judgment') or '').lower() or 'dangerous' in (result.get('judgment') or '').lower())
     stop_scan = False
     is_scanning = True
     socketio.emit('reset')
-    socketio.emit('total_sites', total_sites)
+    socketio.emit('total_sites', total_sites)  # Emit total found sites
     socketio.emit('scan_status', {'scanning': True})
     
     scan_thread = threading.Thread(target=lambda: parallel_scan(new_urls))
@@ -1178,42 +2179,331 @@ def scan():
     
     return jsonify({'status': 'Scan started'})
 
-@app.route('/export_csv')
-def export_csv():
-    global scan_results
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['URL', 'Judgment', 'Confidence', 'Text Result', 'Vision Result', 'Shadowdoor Links', 'Vulnerabilities', 'Error'])
-    for result in scan_results:
-        shadowdoor_str = ''
-        if result.get('shadowdoor_links'):
-            shadowdoor_str = '; '.join([f"{link['category']}: {link['url']} ({link['anchor_text']})" for link in result['shadowdoor_links']])
+@app.route('/submit_feedback', methods=['POST'])
+def submit_feedback():
+    """Handle user feedback for AI learning."""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        feedback_type = data.get('feedback_type')
+        user_comment = data.get('user_comment', '')
+        detailed_feedback = data.get('detailed_feedback', {})
         
-        vulnerabilities_str = ''
-        if result.get('vulnerabilities'):
-            vulnerabilities_str = '; '.join([f"{vuln['severity']}: {vuln['description']}" for vuln in result['vulnerabilities']])
+        if not url or feedback_type not in ['correct', 'incorrect', 'false_positive', 'false_negative', 'unsure']:
+            return jsonify({'success': False, 'error': 'Invalid feedback data'})
         
-        writer.writerow([
-            result.get('url', ''),
-            result.get('judgment', ''),
-            result.get('confidence', ''),
-            result.get('text_result', ''),
-            '; '.join(result.get('vision_results', [])),
-            shadowdoor_str,
-            vulnerabilities_str,
-            result.get('error', '')
-        ])
-    output.seek(0)
-    return send_file(io.BytesIO(output.getvalue().encode('utf-8')), 
-                     mimetype='text/csv', 
-                     as_attachment=True, 
-                     download_name='scan_results.csv')
+        success = db.save_feedback(url, feedback_type, user_comment, detailed_feedback)
+        
+        if success:
+            # Update malicious keywords if new ones were found
+            result = db.get_scan_result(url)
+            if result and result.get('new_keywords'):
+                config.update_malicious_keywords(result['new_keywords'])
+            
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to save feedback'})
+            
+    except Exception as e:
+        logging.error(f"Error submitting feedback: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/analytics')
+def get_analytics():
+    """Get analytics data for dashboard."""
+    try:
+        # Get various statistics
+        stats = db.get_statistics()
+        feedback_stats = db.get_feedback_stats()
+        domain_stats = db.get_domain_statistics()
+        time_series = db.get_time_series_stats(days=30)
+        
+        return jsonify({
+            'overall_stats': stats,
+            'feedback_stats': feedback_stats,
+            'domain_stats': domain_stats,
+            'time_series': time_series
+        })
+    except Exception as e:
+        logging.error(f"Error getting analytics: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/advanced_search', methods=['POST'])
+def advanced_search():
+    """Perform advanced search on scan results."""
+    try:
+        filters = request.get_json()
+        limit = filters.pop('limit', 100)
+        offset = filters.pop('offset', 0)
+        
+        results = db.advanced_query(filters, limit=limit, offset=offset)
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'count': len(results)
+        })
+    except Exception as e:
+        logging.error(f"Error in advanced search: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/export_pdf')
+def export_pdf():
+    """Export scan results to PDF report."""
+    try:
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.graphics.shapes import Drawing
+        from reportlab.graphics.charts.piecharts import Pie
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+        import matplotlib.pyplot as plt
+        import base64
+        from datetime import datetime
+        
+        # Get all results and statistics from database
+        all_results = db.get_all_scan_results()
+        stats = db.get_statistics()
+        
+        # Create PDF buffer
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=50, leftMargin=50, topMargin=50, bottomMargin=50)
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            spaceAfter=30,
+            alignment=1,  # Center alignment
+            textColor=colors.darkblue
+        )
+        
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=16,
+            spaceAfter=12,
+            textColor=colors.darkblue
+        )
+        
+        # Build PDF content
+        content = []
+        
+        # Title page
+        content.append(Paragraph("C.A.K.R.A. Security Scan Report", title_style))
+        content.append(Spacer(1, 20))
+        content.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        content.append(Spacer(1, 30))
+        
+        # Executive Summary
+        content.append(Paragraph("Executive Summary", heading_style))
+        summary_data = [
+            ['Metric', 'Count'],
+            ['Total Sites Scanned', str(stats.get('total_scanned', 0))],
+            ['Safe Sites', str(stats.get('safe_count', 0))],
+            ['Potentially Dangerous Sites', str(stats.get('potential_count', 0))],
+            ['Dangerous Sites', str(stats.get('dangerous_count', 0))],
+            ['Errors Encountered', str(stats.get('error_count', 0))]
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[3*inch, 2*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        content.append(summary_table)
+        content.append(Spacer(1, 30))
+        
+        # Risk Distribution Chart (if we have data)
+        if stats.get('total_scanned', 0) > 0:
+            content.append(Paragraph("Risk Distribution", heading_style))
+            
+            # Create pie chart data
+            safe = stats.get('safe_count', 0)
+            potential = stats.get('potential_count', 0)
+            dangerous = stats.get('dangerous_count', 0)
+            
+            if safe + potential + dangerous > 0:
+                chart_data = []
+                if safe > 0:
+                    chart_data.append(('Safe', safe, colors.green))
+                if potential > 0:
+                    chart_data.append(('Potential Risk', potential, colors.orange))
+                if dangerous > 0:
+                    chart_data.append(('Dangerous', dangerous, colors.red))
+                
+                content.append(Paragraph(f"Safe: {safe} | Potential Risk: {potential} | Dangerous: {dangerous}", styles['Normal']))
+                content.append(Spacer(1, 20))
+        
+        # Detailed Results
+        if all_results:
+            content.append(PageBreak())
+            content.append(Paragraph("Detailed Scan Results", heading_style))
+            
+            # Create table data
+            table_data = [['URL', 'Judgment', 'Confidence', 'Risk Factors']]
+            
+            for result in all_results[:50]:  # Limit to first 50 results for PDF size
+                url = result.get('url', '')[:60] + '...' if len(result.get('url', '')) > 60 else result.get('url', '')
+                judgment = result.get('judgment', 'Unknown')
+                confidence = f"{result.get('confidence', 'N/A')}%" if result.get('confidence') else 'N/A'
+                
+                # Extract risk factors from intelligence data
+                risk_factors = []
+                if result.get('domain_intelligence'):
+                    risk_factors = result['domain_intelligence'].get('risk_factors', [])
+                
+                risk_str = '; '.join(risk_factors[:3]) if risk_factors else 'None detected'
+                if len(risk_str) > 80:
+                    risk_str = risk_str[:77] + '...'
+                
+                table_data.append([url, judgment, confidence, risk_str])
+            
+            # Create and style the table
+            results_table = Table(table_data, colWidths=[2.5*inch, 1.2*inch, 0.8*inch, 2.5*inch])
+            results_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+            ]))
+            
+            content.append(results_table)
+            
+            # Add note if we limited results
+            if len(all_results) > 50:
+                content.append(Spacer(1, 10))
+                content.append(Paragraph(f"Note: Showing first 50 results of {len(all_results)} total results.", styles['Italic']))
+        
+        # Intelligence Summary
+        if all_results:
+            content.append(PageBreak())
+            content.append(Paragraph("Intelligence Summary", heading_style))
+            
+            # Count intelligence findings
+            high_risk_domains = 0
+            domains_with_intel = 0
+            common_risk_factors = {}
+            
+            for result in all_results:
+                if result.get('domain_intelligence'):
+                    domains_with_intel += 1
+                    intel = result['domain_intelligence']
+                    
+                    if intel.get('risk_score', 0) >= 70:
+                        high_risk_domains += 1
+                    
+                    # Count risk factors
+                    for factor in intel.get('risk_factors', []):
+                        common_risk_factors[factor] = common_risk_factors.get(factor, 0) + 1
+            
+            intel_summary = [
+                ['Intelligence Metric', 'Count'],
+                ['Domains with Intelligence Data', str(domains_with_intel)],
+                ['High Risk Domains (Score ≥ 70)', str(high_risk_domains)],
+            ]
+            
+            # Add top risk factors
+            if common_risk_factors:
+                sorted_factors = sorted(common_risk_factors.items(), key=lambda x: x[1], reverse=True)
+                intel_summary.append(['', ''])
+                intel_summary.append(['Top Risk Factors', 'Occurrences'])
+                for factor, count in sorted_factors[:5]:
+                    factor_short = factor[:40] + '...' if len(factor) > 40 else factor
+                    intel_summary.append([factor_short, str(count)])
+            
+            intel_table = Table(intel_summary, colWidths=[4*inch, 1.5*inch])
+            intel_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP')
+            ]))
+            
+            content.append(intel_table)
+        
+        # Footer
+        content.append(Spacer(1, 50))
+        content.append(Paragraph("Report generated by C.A.K.R.A. (Cyber Analysis and Knowledge Repository Assistant)", styles['Italic']))
+        
+        # Build PDF
+        doc.build(content)
+        buffer.seek(0)
+        
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'cakra_security_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        )
+        
+    except Exception as e:
+        logging.error(f"Error exporting PDF: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
-    load_scan_results()  # Load saved results on startup
-    for model in OLLAMA_MODELS.values():
-        try:
-            ollama.list()
-        except:
-            pass
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    # Initialize global variables
+    global scanned_count, potential_count, dangerous_count, total_sites
+    scanned_count = 0
+    potential_count = 0
+    dangerous_count = 0
+    total_sites = 0
+    
+    # Load existing results from database on startup
+    logging.info("Loading existing scan results from database...")
+    all_results = db.get_all_scan_results()
+    scan_results.extend(all_results)
+    
+    # Update global counters
+    stats = db.get_statistics()
+    scanned_count = stats.get('total_scanned', 0)
+    potential_count = stats.get('potential_count', 0)
+    dangerous_count = stats.get('dangerous_count', 0)
+    total_sites = scanned_count
+    
+    logging.info(f"Loaded {len(scan_results)} existing scan results")
+    
+    # Get feedback statistics
+    feedback_stats = db.get_feedback_stats()
+    if feedback_stats.get('total_feedback', 0) > 0:
+        accuracy = feedback_stats.get('accuracy_rate', 0)
+        logging.info(f"AI Feedback Statistics: {feedback_stats['total_feedback']} total, {accuracy:.1f}% accuracy")
+    
+    # Check Ollama models
+    try:
+        ollama.list()
+        logging.info("Ollama connection successful")
+    except Exception as e:
+        logging.warning(f"Ollama connection issue: {e}")
+    
+    # Start the web server
+    web_config = config.get_web_config()
+    logging.info(f"Starting C.A.K.R.A. scanner on {web_config['host']}:{web_config['port']}")
+    
+    socketio.run(
+        app, 
+        host=web_config['host'], 
+        port=web_config['port'], 
+        debug=web_config['debug']
+    )
