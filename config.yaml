@@ -1,0 +1,135 @@
+# C.A.K.R.A Scanner Configuration
+
+# Ollama Models Configuration
+models:
+  text: "qwen2:0.5b"
+  vision: "moondream:1.8b"
+  judge: "deepseek-r1:1.5b"
+
+# Database Configuration
+database:
+  filename: "scan_results.db"
+  enable_cache: true
+  cache_duration_hours: 1
+
+# Shadowdoor Domains (known malicious domains)
+shadowdoor_domains:
+  illegal_gambling:
+    - "example-gambling-site.com"
+    - "fake-casino.net"
+    - "illegal-betting.org"
+  pornography:
+    - "adult-content-site.com"
+    - "illegal-porn.net"
+    - "explicit-material.org"
+  phishing:
+    - "fake-bank-login.com"
+    - "phishing-site.net"
+    - "credential-theft.org"
+  malware:
+    - "malware-host.com"
+    - "trojan-download.net"
+    - "ransomware-site.org"
+
+# Vulnerability Detection Patterns
+vulnerability_patterns:
+  outdated_software: ["wordpress", "joomla", "drupal"]
+  exposed_admin: ["/admin", "/wp-admin", "/administrator"]
+  weak_permissions: ["chmod 777", "writable config"]
+  sql_injection: ["' or 1=1", "union select"]
+  xss_vulnerable: ["<script>", "javascript:", "onload="]
+  file_upload: ["upload.php", "filemanager"]
+  default_credentials: ["admin/admin", "root/root"]
+
+# Malicious Keywords for Detection
+malicious_keywords:
+  - "casino"
+  - "gambling"
+  - "redirect"
+  - "illegal"
+  - "porn"
+  - "drugs"
+  - "judi"
+  - "jvdi"
+  - "ju_di"
+  - "toGel"
+  - "tog3l"
+  - "t0gel"
+  - "slot"
+  - "sl0t"
+  - "s|ot"
+  - "gacor"
+  - "g@cor"
+  - "gac0r"
+  - "taruhan"
+  - "taruh@n"
+  - "bet"
+  - "b3t"
+  - "b3tting"
+  - "poker"
+  - "p0ker"
+  - "pok3r"
+  - "kasino"
+  - "c@sin0"
+  - "jackpot"
+  - "jackp0t"
+  - "j@ckpot"
+  - "bola"
+  - "b0la"
+  - "18+"
+  - "dewasa"
+  - "dewas@"
+  - "bokep"
+  - "b0kep"
+  - "boqep"
+  - "film panas"
+  - "film p@nas"
+  - "seks"
+  - "s3ks"
+  - "s3x"
+  - "ml"
+  - "m3sum"
+  - "mesum"
+  - "video dewasa"
+  - "vidio dewasa"
+  - "cewek nakal"
+  - "c3wek nakal"
+  - "cwk nakal"
+  - "ABG nakal"
+  - "ABG n@kal"
+
+# Scanning Configuration
+scanning:
+  max_workers: 3
+  request_timeout: 10
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  selenium_enabled: true
+  
+# Intelligence Gathering
+intelligence:
+  whois_enabled: true
+  dns_analysis_enabled: true
+  wayback_machine_enabled: false  # Can be enabled later with API key
+  
+# Web Interface
+web:
+  host: "0.0.0.0"
+  port: 5000
+  debug: true
+
+# Indonesian domains for scanning
+indonesian_domains:
+  - ".id"
+  - ".go.id"
+  - ".ac.id"
+  - ".co.id"
+  - ".or.id"
+  - ".net.id"
+  - ".web.id"
+  - ".sch.id"
+  - ".mil.id"
+  - ".gov.id"
+  - ".edu"
+  - ".com"
+  - ".org"
+  - ".net"
