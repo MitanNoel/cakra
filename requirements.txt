@@ -8,3 +8,5 @@ dnspython
 PyYAML
 duckduckgo-search
 ddgs
+selenium
+reportlab
