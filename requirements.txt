@@ -1,3 +1,4 @@
+pip-requirements
 ollama
 requests
 beautifulsoup4
@@ -6,3 +7,4 @@ flask-socketio
 python-whois
 dnspython
 PyYAML
+duckduckgo-search
