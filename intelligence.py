@@ -42,7 +42,7 @@ class IntelligenceGatherer:
             
             # Use the correct function name for newer whois package
             import whois as whois_module
-            w = whois_module.query(domain)
+            w = whois_module.whois(domain)
             
             # Extract key information
             whois_data = {
