@@ -7,3 +7,4 @@ python-whois
 dnspython
 PyYAML
 duckduckgo-search
+ddgs
