@@ -50,51 +50,21 @@ def handle_connect():
 def handle_request_initial():
     global scanned_count, potential_count, dangerous_count, scan_results, total_sites, is_scanning, total_scanning_sites
     
-    # Initialize counters if not already done
-    if 'scanned_count' not in globals():
-        scanned_count = 0
-        potential_count = 0
-        dangerous_count = 0
-        total_sites = 0
-        total_scanning_sites = 0
-    
-    # Get statistics from database
-    stats = db.get_statistics()
-    
-    # Get all results to properly count
-    all_results = db.query_results(limit=1000)
-    
-    # Count properly:
-    # - Found: Total unique sites discovered (all entries in database)
-    # - Scanned: Sites with completed analysis (both text and vision analysis done)
-    found_count = len(all_results)  # Total sites discovered
-    
-    # A site is "scanned" if it has both text_result and vision_results, and judgment is not "Queued"
-    completed_count = 0
-    for result in all_results:
-        has_text = result.get('text_result') and result.get('text_result').strip()
-        has_vision = result.get('vision_results') and len(result.get('vision_results', [])) > 0
-        is_not_queued = result.get('judgment') and result.get('judgment') != 'Queued'
-        
-        if has_text and has_vision and is_not_queued:
-            completed_count += 1
-    
-    # Use database stats for threat classification
-    potential_count = stats.get('potential_count', 0)
-    dangerous_count = stats.get('dangerous_count', 0)
+    # Use the global counters that are maintained during scanning
+    # Don't recalculate from database to avoid inconsistencies
     
     # Get recent results for display
     recent_results = db.query_results(limit=100)
     
     socketio.emit('initial_state', {
-        'scanned': completed_count,  # Only fully analyzed sites
-        'found': found_count,        # Total discovered sites
+        'scanned': scanned_count,  # Use global counter
+        'found': total_sites,      # Use global counter
         'potential': potential_count,
         'dangerous': dangerous_count,
         'results': recent_results,
-        'total_sites': found_count
+        'total_sites': total_sites
     })
-    socketio.emit('total_sites', found_count)
+    socketio.emit('total_sites', total_sites)
     socketio.emit('scan_status', {'scanning': is_scanning})
 
 # Load configuration values
@@ -744,7 +714,7 @@ def parallel_scan(sites, max_workers=8):  # Increased from 3 to 8 for faster pro
                 current_scanning.remove(site) if site in current_scanning else None
                 result = future.result()
                 analysis_results.append(result)
-                scanned_count += 1
+                # Don't increment scanned_count here - we'll do it after judgment
                 
                 # Check for redirects in result
                 if 'server_info' in result and result.get('server_info', {}).get('final_url') and result['server_info']['final_url'] != result['url']:
@@ -2480,7 +2450,7 @@ if __name__ == "__main__":
     scanned_count = stats.get('total_scanned', 0)
     potential_count = stats.get('potential_count', 0)
     dangerous_count = stats.get('dangerous_count', 0)
-    total_sites = scanned_count
+    total_sites = len(scan_results)  # Total discovered sites, not just scanned ones
     
     logging.info(f"Loaded {len(scan_results)} existing scan results")
     
