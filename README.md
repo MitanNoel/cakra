@@ -14,6 +14,16 @@ Workflow sementara
 Install library use : pip install -r requirements.txt
 Run System : python main.py
 
+*Use this for ollama (first time use) :
+
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama serve
+ollama run deepseek-r1:1.5b
+ollama run moondream:1.8b
+ollama run qwen2:0.5b
+
+Otherwise just use : ollama serve
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Metode yang akan digunakan : (*BELUM ACC*)
 
