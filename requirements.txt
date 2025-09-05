@@ -1,0 +1,8 @@
+ollama
+requests
+beautifulsoup4
+flask
+flask-socketio
+python-whois
+dnspython
+PyYAML

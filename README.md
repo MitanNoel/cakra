@@ -11,6 +11,8 @@ Workflow sementara
 (7) Cari informasi mengenai tantangan etika dan teknis yang terkait dengan deteksi konten, seperti masalah privasi, potensi false positive, dan penanganan konten yang ambigu.
 (8) Bandingkan fitur-fitur yang dianalisis dengan solusi atau layanan sejenis yang sudah ada di pasar untuk mengidentifikasi praktik terbaik dan kekurangan yang bisa diperbaiki.
 
+Install library use : pip install -r requirements.txt
+Run System : python main.py
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Metode yang akan digunakan : (*BELUM ACC*)
