@@ -526,8 +526,8 @@ def judge_evidence(text_result, vision_results, url, server_info, shadowdoor_lin
                     if 0 <= confidence <= 100:
                         break
             
-            # Look for illegal rate patterns
-            elif 'illegal rate' in line.lower() or ('illegal' in line.lower() and 'rate' in line.lower()):
+            # Look for illegal rate patterns - be more specific
+            elif '**illegal rate' in line.lower() or 'illegal rate' in line.lower():
                 import re
                 match = re.search(r'\b(\d{1,3})\b', line)
                 if match:
@@ -2347,33 +2347,65 @@ def export_pdf():
         
         # Get styles
         styles = getSampleStyleSheet()
+        
+        # Enhanced title style
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
-            fontSize=24,
-            spaceAfter=30,
+            fontSize=28,
+            spaceAfter=20,
             alignment=1,  # Center alignment
-            textColor=colors.darkblue
+            textColor=colors.darkblue,
+            fontName='Helvetica-Bold'
+        )
+        
+        # Subtitle style
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle',
+            parent=styles['Normal'],
+            fontSize=14,
+            spaceAfter=40,
+            alignment=1,
+            textColor=colors.darkgrey
         )
         
         heading_style = ParagraphStyle(
             'CustomHeading',
             parent=styles['Heading2'],
-            fontSize=16,
-            spaceAfter=12,
-            textColor=colors.darkblue
+            fontSize=18,
+            spaceAfter=15,
+            textColor=colors.darkblue,
+            fontName='Helvetica-Bold'
+        )
+        
+        subheading_style = ParagraphStyle(
+            'CustomSubheading',
+            parent=styles['Heading3'],
+            fontSize=14,
+            spaceAfter=10,
+            textColor=colors.darkgreen,
+            fontName='Helvetica-Bold'
         )
         
         # Build PDF content
         content = []
         
-        # Title page
-        content.append(Paragraph("C.A.K.R.A. Security Scan Report", title_style))
-        content.append(Spacer(1, 20))
-        content.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        # Cover Page
+        content.append(Spacer(1, 100))  # Top margin
+        content.append(Paragraph("C.A.K.R.A.", title_style))
+        content.append(Paragraph("Cyber Analysis and Knowledge Repository Assistant", subtitle_style))
+        content.append(Spacer(1, 50))
+        content.append(Paragraph("Security Scan Report", heading_style))
         content.append(Spacer(1, 30))
+        content.append(Paragraph(f"Generated on: {datetime.now().strftime('%B %d, %Y at %H:%M:%S')}", styles['Normal']))
+        content.append(Spacer(1, 20))
+        content.append(Paragraph(f"Total Sites Analyzed: {stats.get('total_scanned', 0)}", styles['Normal']))
+        content.append(Spacer(1, 100))
+        content.append(Paragraph("Confidential - For Security Analysis Only", styles['Italic']))
         
-        # Executive Summary
+        content.append(PageBreak())
+        
+        # Executive Summary with Illegal Rate
         content.append(Paragraph("Executive Summary", heading_style))
         summary_data = [
             ['Metric', 'Count'],
@@ -2381,6 +2413,8 @@ def export_pdf():
             ['Safe Sites', str(stats.get('safe_count', 0))],
             ['Potentially Dangerous Sites', str(stats.get('potential_count', 0))],
             ['Dangerous Sites', str(stats.get('dangerous_count', 0))],
+            ['Average Confidence Score', f"{stats.get('avg_confidence', 0):.1f}%"],
+            ['Average Illegal Rate', f"{stats.get('avg_illegal_rate', 0):.1f}%"],
             ['Errors Encountered', str(stats.get('error_count', 0))]
         ]
         
@@ -2392,8 +2426,9 @@ def export_pdf():
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 12),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightblue])
         ]))
         
         content.append(summary_table)
@@ -2425,31 +2460,47 @@ def export_pdf():
             content.append(PageBreak())
             content.append(Paragraph("Detailed Scan Results", heading_style))
             
-            # Create table data
-            table_data = [['URL', 'Judgment', 'Confidence', 'Risk Factors']]
+            # Create table data with more columns
+            table_data = [['URL', 'Confidence', 'Illegal Rate', 'Judgment', 'Risk Level']]
             
-            for result in all_results[:50]:  # Limit to first 50 results for PDF size
-                url = result.get('url', '')[:60] + '...' if len(result.get('url', '')) > 60 else result.get('url', '')
+            for result in all_results[:100]:  # Increased limit for more comprehensive report
+                url = result.get('url', '')[:50] + '...' if result.get('url') and len(result.get('url', '')) > 50 else result.get('url', '')
+                confidence = f"{result.get('confidence', 'N/A')}%" if result.get('confidence') is not None else 'N/A'
+                illegal_rate = f"{result.get('illegal_rate', 'N/A')}%" if result.get('illegal_rate') is not None else 'N/A'
+                
                 judgment = result.get('judgment', 'Unknown')
-                confidence = f"{result.get('confidence', 'N/A')}%" if result.get('confidence') else 'N/A'
+                if judgment and len(judgment) > 100:
+                    judgment = judgment[:97] + '...'
                 
-                # Extract risk factors from intelligence data
-                risk_factors = []
-                if result.get('domain_intelligence'):
-                    risk_factors = result['domain_intelligence'].get('risk_factors', [])
+                # Determine risk level based on scores
+                risk_level = 'Unknown'
+                risk_color = colors.black
+                if result.get('confidence') is not None and result.get('illegal_rate') is not None:
+                    conf = result['confidence']
+                    illegal = result['illegal_rate']
+                    if conf < 30 and illegal < 20:
+                        risk_level = 'Low Risk'
+                        risk_color = colors.green
+                    elif conf < 60 and illegal < 40:
+                        risk_level = 'Medium Risk'
+                        risk_color = colors.orange
+                    elif conf >= 60 or illegal >= 40:
+                        risk_level = 'High Risk'
+                        risk_color = colors.red
+                    else:
+                        risk_level = 'Moderate Risk'
+                        risk_color = colors.blue
                 
-                risk_str = '; '.join(risk_factors[:3]) if risk_factors else 'None detected'
-                if len(risk_str) > 80:
-                    risk_str = risk_str[:77] + '...'
-                
-                table_data.append([url, judgment, confidence, risk_str])
+                table_data.append([url, confidence, illegal_rate, judgment, risk_level])
             
-            # Create and style the table
-            results_table = Table(table_data, colWidths=[2.5*inch, 1.2*inch, 0.8*inch, 2.5*inch])
+            # Create and style the table with updated columns
+            results_table = Table(table_data, colWidths=[2*inch, 0.8*inch, 0.8*inch, 2.5*inch, 0.9*inch])
             results_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (2, -1), 'CENTER'),  # Center confidence and illegal rate
+                ('ALIGN', (4, 0), (4, -1), 'CENTER'),  # Center risk level
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
                 ('FONTSIZE', (0, 1), (-1, -1), 8),
@@ -2459,12 +2510,81 @@ def export_pdf():
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
             ]))
             
+            # Add risk level colors
+            for i, row in enumerate(table_data[1:], 1):  # Skip header row
+                risk_text = row[4]
+                if 'Low Risk' in risk_text:
+                    results_table.setStyle(TableStyle([('TEXTCOLOR', (4, i), (4, i), colors.green)]))
+                elif 'Medium Risk' in risk_text:
+                    results_table.setStyle(TableStyle([('TEXTCOLOR', (4, i), (4, i), colors.orange)]))
+                elif 'High Risk' in risk_text:
+                    results_table.setStyle(TableStyle([('TEXTCOLOR', (4, i), (4, i), colors.red)]))
+                elif 'Moderate Risk' in risk_text:
+                    results_table.setStyle(TableStyle([('TEXTCOLOR', (4, i), (4, i), colors.blue)]))
+            
             content.append(results_table)
             
             # Add note if we limited results
-            if len(all_results) > 50:
+            if len(all_results) > 100:
                 content.append(Spacer(1, 10))
-                content.append(Paragraph(f"Note: Showing first 50 results of {len(all_results)} total results.", styles['Italic']))
+                content.append(Paragraph(f"Note: Showing first 100 results of {len(all_results)} total results.", styles['Italic']))
+        
+        # Detailed Analysis Section
+        if all_results:
+            content.append(PageBreak())
+            content.append(Paragraph("Detailed Analysis Report", heading_style))
+            
+            # Show top 5 most recent detailed results
+            recent_results = sorted(all_results, key=lambda x: x.get('updated_at', ''), reverse=True)[:5]
+            
+            for i, result in enumerate(recent_results, 1):
+                content.append(Paragraph(f"Analysis #{i}: {result.get('url', 'Unknown URL')}", heading_style))
+                
+                # Basic info table
+                basic_data = [
+                    ['Metric', 'Value'],
+                    ['Confidence Score', f"{result.get('confidence', 'N/A')}%"],
+                    ['Illegal Rate', f"{result.get('illegal_rate', 'N/A')}%"],
+                    ['Status Code', result.get('server_info', {}).get('status_code', 'Unknown')],
+                    ['Response Time', f"{result.get('server_info', {}).get('response_time', 'Unknown')}s"],
+                    ['SSL Valid', 'Yes' if result.get('server_info', {}).get('ssl_info', {}).get('valid') else 'No']
+                ]
+                
+                basic_table = Table(basic_data, colWidths=[2*inch, 3*inch])
+                basic_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkgreen),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9)
+                ]))
+                content.append(basic_table)
+                content.append(Spacer(1, 15))
+                
+                # Text Analysis
+                if result.get('text_result'):
+                    content.append(Paragraph("Text Analysis:", styles['Heading4']))
+                    text_content = result['text_result'][:500] + '...' if len(result['text_result']) > 500 else result['text_result']
+                    content.append(Paragraph(text_content, styles['Normal']))
+                    content.append(Spacer(1, 10))
+                
+                # Vision Analysis
+                if result.get('vision_results'):
+                    content.append(Paragraph("Vision Analysis:", styles['Heading4']))
+                    vision_content = str(result['vision_results'])[:500] + '...' if len(str(result['vision_results'])) > 500 else str(result['vision_results'])
+                    content.append(Paragraph(vision_content, styles['Normal']))
+                    content.append(Spacer(1, 10))
+                
+                # Judgment Summary
+                if result.get('judgment'):
+                    content.append(Paragraph("Judgment Summary:", styles['Heading4']))
+                    judgment_content = result['judgment'][:800] + '...' if len(result['judgment']) > 800 else result['judgment']
+                    content.append(Paragraph(judgment_content, styles['Normal']))
+                
+                content.append(Spacer(1, 20))
+                
+                # Add page break between detailed analyses (except for last one)
+                if i < len(recent_results):
+                    content.append(PageBreak())
         
         # Intelligence Summary
         if all_results:
@@ -2500,7 +2620,7 @@ def export_pdf():
                 intel_summary.append(['', ''])
                 intel_summary.append(['Top Risk Factors', 'Occurrences'])
                 for factor, count in sorted_factors[:5]:
-                    factor_short = factor[:40] + '...' if len(factor) > 40 else factor
+                    factor_short = factor[:40] + '...' if factor and len(factor) > 40 else factor
                     intel_summary.append([factor_short, str(count)])
             
             intel_table = Table(intel_summary, colWidths=[4*inch, 1.5*inch])
@@ -2520,6 +2640,8 @@ def export_pdf():
         # Footer
         content.append(Spacer(1, 50))
         content.append(Paragraph("Report generated by C.A.K.R.A. (Cyber Analysis and Knowledge Repository Assistant)", styles['Italic']))
+        content.append(Paragraph(f"Total analysis time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Italic']))
+        content.append(Paragraph("This report contains sensitive security information. Handle with care.", styles['Italic']))
         
         # Build PDF
         doc.build(content)

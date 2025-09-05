@@ -138,7 +138,7 @@ class ScanDatabase:
             cursor = conn.cursor()
             
             cursor.execute('''
-                SELECT url, judgment, confidence, text_result, vision_results, server_info,
+                SELECT url, judgment, confidence, illegal_rate, text_result, vision_results, server_info,
                        shadowdoor_links, vulnerabilities, new_keywords, error, cached,
                        created_at, updated_at
                 FROM scan_results WHERE url = ?
@@ -152,16 +152,17 @@ class ScanDatabase:
                     'url': row[0],
                     'judgment': row[1],
                     'confidence': row[2],
-                    'text_result': row[3],
-                    'vision_results': json.loads(row[4]) if row[4] else [],
-                    'server_info': json.loads(row[5]) if row[5] else {},
-                    'shadowdoor_links': json.loads(row[6]) if row[6] else [],
-                    'vulnerabilities': json.loads(row[7]) if row[7] else [],
-                    'new_keywords': json.loads(row[8]) if row[8] else [],
-                    'error': row[9],
-                    'cached': row[10],
-                    'created_at': row[11],
-                    'updated_at': row[12]
+                    'illegal_rate': row[3],
+                    'text_result': row[4],
+                    'vision_results': json.loads(row[5]) if row[5] else [],
+                    'server_info': json.loads(row[6]) if row[6] else {},
+                    'shadowdoor_links': json.loads(row[7]) if row[7] else [],
+                    'vulnerabilities': json.loads(row[8]) if row[8] else [],
+                    'new_keywords': json.loads(row[9]) if row[9] else [],
+                    'error': row[10],
+                    'cached': row[11],
+                    'created_at': row[12],
+                    'updated_at': row[13]
                 }
             return None
         except Exception as e:
@@ -175,7 +176,7 @@ class ScanDatabase:
             cursor = conn.cursor()
             
             cursor.execute('''
-                SELECT url, judgment, confidence, text_result, vision_results, server_info,
+                SELECT url, judgment, confidence, illegal_rate, text_result, vision_results, server_info,
                        shadowdoor_links, vulnerabilities, new_keywords, error, cached,
                        created_at, updated_at
                 FROM scan_results ORDER BY updated_at DESC
@@ -190,16 +191,17 @@ class ScanDatabase:
                     'url': row[0],
                     'judgment': row[1],
                     'confidence': row[2],
-                    'text_result': row[3],
-                    'vision_results': json.loads(row[4]) if row[4] else [],
-                    'server_info': json.loads(row[5]) if row[5] else {},
-                    'shadowdoor_links': json.loads(row[6]) if row[6] else [],
-                    'vulnerabilities': json.loads(row[7]) if row[7] else [],
-                    'new_keywords': json.loads(row[8]) if row[8] else [],
-                    'error': row[9],
-                    'cached': row[10],
-                    'created_at': row[11],
-                    'updated_at': row[12]
+                    'illegal_rate': row[3],
+                    'text_result': row[4],
+                    'vision_results': json.loads(row[5]) if row[5] else [],
+                    'server_info': json.loads(row[6]) if row[6] else {},
+                    'shadowdoor_links': json.loads(row[7]) if row[7] else [],
+                    'vulnerabilities': json.loads(row[8]) if row[8] else [],
+                    'new_keywords': json.loads(row[9]) if row[9] else [],
+                    'error': row[10],
+                    'cached': row[11],
+                    'created_at': row[12],
+                    'updated_at': row[13]
                 })
             return results
         except Exception as e:
@@ -214,7 +216,7 @@ class ScanDatabase:
             cursor = conn.cursor()
             
             query = '''
-                SELECT url, judgment, confidence, text_result, vision_results, server_info,
+                SELECT url, judgment, confidence, illegal_rate, text_result, vision_results, server_info,
                        shadowdoor_links, vulnerabilities, new_keywords, error, cached,
                        created_at, updated_at
                 FROM scan_results WHERE 1=1
@@ -474,7 +476,7 @@ class ScanDatabase:
             cursor = conn.cursor()
             
             query = '''
-                SELECT url, judgment, confidence, text_result, vision_results, server_info,
+                SELECT url, judgment, confidence, illegal_rate, text_result, vision_results, server_info,
                        shadowdoor_links, vulnerabilities, new_keywords, error, cached,
                        created_at, updated_at
                 FROM scan_results WHERE 1=1
@@ -537,16 +539,17 @@ class ScanDatabase:
                     'url': row[0],
                     'judgment': row[1],
                     'confidence': row[2],
-                    'text_result': row[3],
-                    'vision_results': json.loads(row[4]) if row[4] else [],
-                    'server_info': json.loads(row[5]) if row[5] else {},
-                    'shadowdoor_links': json.loads(row[6]) if row[6] else [],
-                    'vulnerabilities': json.loads(row[7]) if row[7] else [],
-                    'new_keywords': json.loads(row[8]) if row[8] else [],
-                    'error': row[9],
-                    'cached': row[10],
-                    'created_at': row[11],
-                    'updated_at': row[12]
+                    'illegal_rate': row[3],
+                    'text_result': row[4],
+                    'vision_results': json.loads(row[5]) if row[5] else [],
+                    'server_info': json.loads(row[6]) if row[6] else {},
+                    'shadowdoor_links': json.loads(row[7]) if row[7] else [],
+                    'vulnerabilities': json.loads(row[8]) if row[8] else [],
+                    'new_keywords': json.loads(row[9]) if row[9] else [],
+                    'error': row[10],
+                    'cached': row[11],
+                    'created_at': row[12],
+                    'updated_at': row[13]
                 })
             return results
         except Exception as e:
@@ -640,3 +643,46 @@ class ScanDatabase:
         except Exception as e:
             logging.error(f"Error getting time series stats: {e}")
             return {'time_series': []}
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get overall statistics for PDF reports."""
+        try:
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            # Get basic counts
+            cursor.execute('''
+                SELECT 
+                    COUNT(*) as total_scanned,
+                    AVG(confidence) as avg_confidence,
+                    AVG(illegal_rate) as avg_illegal_rate,
+                    SUM(CASE WHEN judgment LIKE '%safe%' THEN 1 ELSE 0 END) as safe_count,
+                    SUM(CASE WHEN judgment LIKE '%potential%' OR judgment LIKE '%suspicious%' THEN 1 ELSE 0 END) as potential_count,
+                    SUM(CASE WHEN judgment LIKE '%malicious%' OR judgment LIKE '%dangerous%' THEN 1 ELSE 0 END) as dangerous_count,
+                    SUM(CASE WHEN error IS NOT NULL AND error != '' THEN 1 ELSE 0 END) as error_count
+                FROM scan_results
+            ''')
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            return {
+                'total_scanned': row[0] or 0,
+                'avg_confidence': round(row[1] or 0, 2),
+                'avg_illegal_rate': round(row[2] or 0, 2),
+                'safe_count': row[3] or 0,
+                'potential_count': row[4] or 0,
+                'dangerous_count': row[5] or 0,
+                'error_count': row[6] or 0
+            }
+        except Exception as e:
+            logging.error(f"Error getting statistics: {e}")
+            return {
+                'total_scanned': 0,
+                'avg_confidence': 0,
+                'avg_illegal_rate': 0,
+                'safe_count': 0,
+                'potential_count': 0,
+                'dangerous_count': 0,
+                'error_count': 0
+            }
