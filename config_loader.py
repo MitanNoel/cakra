@@ -108,7 +108,9 @@ class ConfigLoader:
             'intelligence': {
                 'whois_enabled': True,
                 'dns_analysis_enabled': True,
-                'wayback_machine_enabled': False
+                'wayback_machine_enabled': False,
+                'whois_timeout': 15,
+                'whois_max_retries': 3
             },
             'web': {
                 'host': '0.0.0.0',

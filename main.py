@@ -34,7 +34,7 @@ except ImportError:
 # Initialize configuration
 config = ConfigLoader()
 db = ScanDatabase(config.get_database_config()['filename'])
-intelligence = IntelligenceGatherer()
+intelligence = IntelligenceGatherer(config.get_intelligence_config())
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

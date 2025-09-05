@@ -110,6 +110,8 @@ intelligence:
   whois_enabled: true
   dns_analysis_enabled: true
   wayback_machine_enabled: false  # Can be enabled later with API key
+  whois_timeout: 15
+  whois_max_retries: 3
   
 # Web Interface
 web:

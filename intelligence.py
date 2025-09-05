@@ -13,10 +13,15 @@ import re
 class IntelligenceGatherer:
     """Enhanced intelligence gathering for domains and websites."""
     
-    def __init__(self):
+    def __init__(self, config=None):
         self.dns_resolver = dns.resolver.Resolver()
         self.dns_resolver.timeout = 5
         self.dns_resolver.lifetime = 10
+        
+        # Configuration
+        self.config = config or {}
+        self.whois_timeout = self.config.get('whois_timeout', 15)
+        self.whois_max_retries = self.config.get('whois_max_retries', 3)
     
     def get_domain_from_url(self, url: str) -> str:
         """Extract domain from URL."""
@@ -31,86 +36,97 @@ class IntelligenceGatherer:
             return url.replace('https://', '').replace('http://', '').split('/')[0].lower()
     
     def get_whois_data(self, domain: str) -> Dict[str, Any]:
-        """Get WHOIS data for a domain with timeout handling."""
-        try:
-            # Clean domain name
-            domain = domain.replace('www.', '').split('/')[0]
-            
-            # Set shorter timeout for WHOIS lookups
-            import socket
-            socket.setdefaulttimeout(10)  # 10 second timeout
-            
-            # Use the correct function name for newer whois package
-            import whois as whois_module
-            w = whois_module.whois(domain)
-            
-            # Extract key information
-            whois_data = {
-                'domain_name': getattr(w, 'domain_name', None),
-                'registrar': getattr(w, 'registrar', None),
-                'creation_date': self._format_date(getattr(w, 'creation_date', None)),
-                'expiration_date': self._format_date(getattr(w, 'expiration_date', None)),
-                'updated_date': self._format_date(getattr(w, 'updated_date', None)),
-                'name_servers': getattr(w, 'name_servers', None),
-                'status': getattr(w, 'status', None),
-                'emails': getattr(w, 'emails', None),
-                'country': getattr(w, 'country', None),
-                'org': getattr(w, 'org', None),
-                'registrant_name': getattr(w, 'name', None),
-                'registrant_postal_code': getattr(w, 'registrant_postal_code', None),
-            }
-            
-            # Calculate domain age
-            if whois_data['creation_date']:
-                try:
-                    if isinstance(whois_data['creation_date'], list):
-                        creation_date = whois_data['creation_date'][0]
-                    else:
-                        creation_date = whois_data['creation_date']
-                    
-                    if isinstance(creation_date, str):
-                        # Try to parse string date
-                        creation_date = datetime.fromisoformat(creation_date.replace('Z', '+00:00'))
-                    
-                    now = datetime.now(timezone.utc)
-                    if creation_date.tzinfo is None:
-                        creation_date = creation_date.replace(tzinfo=timezone.utc)
-                    
-                    age_days = (now - creation_date).days
-                    whois_data['domain_age_days'] = age_days
-                    whois_data['is_newly_registered'] = age_days < 30  # Less than 30 days
-                    whois_data['is_very_new'] = age_days < 7  # Less than 7 days
-                except Exception as e:
-                    logging.warning(f"Error calculating domain age: {e}")
-                    whois_data['domain_age_days'] = None
-                    whois_data['is_newly_registered'] = False
-                    whois_data['is_very_new'] = False
-            
-            return {
-                'success': True,
-                'data': whois_data,
-                'suspicious_indicators': self._analyze_whois_suspicion(whois_data)
-            }
-            
-        except socket.timeout:
-            logging.warning(f"WHOIS lookup timed out for {domain}")
-            return {
-                'success': False,
-                'error': 'WHOIS lookup timed out',
-                'data': {},
-                'suspicious_indicators': ['WHOIS lookup timed out - could not verify domain information']
-            }
-        except Exception as e:
-            logging.error(f"WHOIS lookup failed for {domain}: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'data': {},
-                'suspicious_indicators': []
-            }
-        finally:
-            # Reset socket timeout to default
-            socket.setdefaulttimeout(None)
+        """Get WHOIS data for a domain with timeout handling and retry logic."""
+        max_retries = self.whois_max_retries
+        base_timeout = self.whois_timeout
+        
+        for attempt in range(max_retries):
+            try:
+                # Clean domain name
+                domain = domain.replace('www.', '').split('/')[0]
+                
+                # Set timeout with exponential backoff
+                timeout = base_timeout * (2 ** attempt)
+                import socket
+                socket.setdefaulttimeout(timeout)
+                
+                # Use the correct function name for newer whois package
+                import whois as whois_module
+                w = whois_module.whois(domain)
+                
+                # Extract key information
+                whois_data = {
+                    'domain_name': getattr(w, 'domain_name', None),
+                    'registrar': getattr(w, 'registrar', None),
+                    'creation_date': self._format_date(getattr(w, 'creation_date', None)),
+                    'expiration_date': self._format_date(getattr(w, 'expiration_date', None)),
+                    'updated_date': self._format_date(getattr(w, 'updated_date', None)),
+                    'name_servers': getattr(w, 'name_servers', None),
+                    'status': getattr(w, 'status', None),
+                    'emails': getattr(w, 'emails', None),
+                    'country': getattr(w, 'country', None),
+                    'org': getattr(w, 'org', None),
+                    'registrant_name': getattr(w, 'name', None),
+                    'registrant_postal_code': getattr(w, 'registrant_postal_code', None),
+                }
+                
+                # Calculate domain age
+                if whois_data['creation_date']:
+                    try:
+                        if isinstance(whois_data['creation_date'], list):
+                            creation_date = whois_data['creation_date'][0]
+                        else:
+                            creation_date = whois_data['creation_date']
+                        
+                        if isinstance(creation_date, str):
+                            # Try to parse string date
+                            creation_date = datetime.fromisoformat(creation_date.replace('Z', '+00:00'))
+                        
+                        now = datetime.now(timezone.utc)
+                        if creation_date.tzinfo is None:
+                            creation_date = creation_date.replace(tzinfo=timezone.utc)
+                        
+                        age_days = (now - creation_date).days
+                        whois_data['domain_age_days'] = age_days
+                        whois_data['is_newly_registered'] = age_days < 30  # Less than 30 days
+                        whois_data['is_very_new'] = age_days < 7  # Less than 7 days
+                    except Exception as e:
+                        logging.warning(f"Error calculating domain age: {e}")
+                        whois_data['domain_age_days'] = None
+                        whois_data['is_newly_registered'] = False
+                        whois_data['is_very_new'] = False
+                
+                return {
+                    'success': True,
+                    'data': whois_data,
+                    'suspicious_indicators': self._analyze_whois_suspicion(whois_data)
+                }
+                
+            except socket.timeout:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    logging.warning(f"WHOIS lookup timed out for {domain}, attempt {attempt + 1}/{max_retries}, retrying in {wait_time}s")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logging.warning(f"WHOIS lookup timed out for {domain} after {max_retries} attempts")
+                    return {
+                        'success': False,
+                        'error': 'WHOIS lookup timed out after retries',
+                        'data': {},
+                        'suspicious_indicators': ['WHOIS lookup timed out - could not verify domain information']
+                    }
+            except Exception as e:
+                logging.error(f"WHOIS lookup failed for {domain}: {e}")
+                return {
+                    'success': False,
+                    'error': str(e),
+                    'data': {},
+                    'suspicious_indicators': []
+                }
+            finally:
+                # Reset socket timeout to default
+                socket.setdefaulttimeout(None)
     
     def _format_date(self, date_obj):
         """Format date object to string."""
