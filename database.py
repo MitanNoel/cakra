@@ -23,6 +23,7 @@ class ScanDatabase:
                 url TEXT UNIQUE NOT NULL,
                 judgment TEXT,
                 confidence INTEGER,
+                illegal_rate INTEGER,
                 text_result TEXT,
                 vision_results TEXT,  -- JSON array
                 server_info TEXT,     -- JSON object
@@ -105,13 +106,14 @@ class ScanDatabase:
             
             cursor.execute('''
                 INSERT OR REPLACE INTO scan_results 
-                (url, judgment, confidence, text_result, vision_results, server_info, 
+                (url, judgment, confidence, illegal_rate, text_result, vision_results, server_info, 
                  shadowdoor_links, vulnerabilities, new_keywords, error, cached, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (
                 result['url'],
                 result.get('judgment'),
                 result.get('confidence'),
+                result.get('illegal_rate'),
                 result.get('text_result'),
                 vision_results,
                 server_info,
@@ -569,6 +571,7 @@ class ScanDatabase:
                     END as domain,
                     COUNT(*) as total_scans,
                     AVG(confidence) as avg_confidence,
+                    AVG(illegal_rate) as avg_illegal_rate,
                     SUM(CASE WHEN judgment LIKE '%malicious%' OR judgment LIKE '%dangerous%' THEN 1 ELSE 0 END) as dangerous_count,
                     SUM(CASE WHEN judgment LIKE '%potential%' OR judgment LIKE '%suspicious%' THEN 1 ELSE 0 END) as potential_count,
                     MAX(created_at) as last_scanned
@@ -588,9 +591,10 @@ class ScanDatabase:
                         'domain': row[0],
                         'total_scans': row[1],
                         'avg_confidence': round(row[2] or 0, 2),
-                        'dangerous_count': row[3],
-                        'potential_count': row[4],
-                        'last_scanned': row[5]
+                        'avg_illegal_rate': round(row[3] or 0, 2),
+                        'dangerous_count': row[4],
+                        'potential_count': row[5],
+                        'last_scanned': row[6]
                     }
                     for row in domain_stats
                 ]

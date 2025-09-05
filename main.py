@@ -358,19 +358,40 @@ def fetch_with_selenium(url):
             pass
 
 def analyze_text(content, model):
-    prompt = f"Analyze this webpage text for malicious or illegal keywords like {', '.join(MALICIOUS_KEYWORDS)}. Provide a brief summary of findings. Also, extract any new keywords related to pornography or gambling found in the text."
+    # Skip analysis if content is too short or appears to be an error page
+    if len(content.strip()) < 50:
+        return "Content too short to analyze - possible access restriction", []
+    
+    prompt = f"""Analyze this webpage text for security and content assessment. 
+Focus on:
+1. Actual content found on the page
+2. Any malicious or suspicious keywords
+3. Legitimate business purpose of the site
+
+IMPORTANT: Only report keywords and content that actually appear in the provided text. Do not hallucinate or invent content.
+
+Text to analyze:
+{content[:3000]}
+
+Provide a brief, factual summary of what this webpage actually contains."""
+    
     try:
-        response = ollama.generate(model=model, prompt=prompt + '\n\n' + content[:2000])
+        response = ollama.generate(model=model, prompt=prompt)
         cleaned = clean_response(response['response'])
+        
+        # Extract any new keywords mentioned in the analysis
         new_keywords = []
-        if 'new keywords:' in cleaned.lower():
-            parts = cleaned.lower().split('new keywords:')
-            if len(parts) > 1:
-                new_part = parts[1].split('\n')[0]
-                new_keywords = [word.strip() for word in new_part.split(',') if word.strip()]
+        if 'keyword' in cleaned.lower():
+            import re
+            # Look for quoted words that might be keywords
+            matches = re.findall(r'["\']([^"\']+)["\']', cleaned)
+            for match in matches:
+                if len(match.strip()) > 2 and match.strip() not in MALICIOUS_KEYWORDS:
+                    new_keywords.append(match.strip())
+        
         return cleaned, new_keywords
     except Exception as e:
-        return f"Error: {str(e)}", []
+        return f"Error analyzing text: {str(e)}", []
 
 def analyze_images(images, model):
     """Analyze images for security threats and malicious content."""
@@ -478,7 +499,7 @@ def judge_evidence(text_result, vision_results, url, server_info, shadowdoor_lin
         vision_text = '; '.join(vision_results) if vision_results else ''
     
     evidence = f"Text: {text_result}\nVision: {vision_text}\nServer Info: {json.dumps(server_info)}\nShadowdoor Links: {json.dumps(shadowdoor_links)}\nVulnerabilities: {json.dumps(vulnerabilities)}"
-    prompt = f"Based on evidence from text, vision analysis, server information, shadowdoor detection, and vulnerability analysis of {url}, provide a structured judgment:\n- Confidence Score (0-100, where 0 is very safe and 100 is very dangerous)\n- Detailed Result (malicious/safe)\n- Website Weaknesses (e.g., outdated software, missing security headers like HTTPS, HSTS, CSP, X-Frame-Options)\n- Security Vulnerabilities (potential XSS, SQL injection, CSRF indicators)\n- Shadowdoor/Defacement Detection (links to illegal content, malicious domains)\n- Domain/IP Address: {server_info.get('ip_address', 'Unknown')}\n- Server Version: {server_info.get('server', 'Unknown')}\n- Content Analysis: Check for malicious scripts, phishing elements, or illegal content\n- Recommendations (only for detailed view)"
+    prompt = f"Based on evidence from text, vision analysis, server information, shadowdoor detection, and vulnerability analysis of {url}, provide a structured judgment:\n- Confidence Score (0-100, where 0 is very safe and 100 is very dangerous)\n- Illegal Rate (0-100, where 0 is completely legal/safe content and 100 is highly illegal content like pornography, gambling, drugs, etc.)\n- Detailed Result (malicious/safe)\n- Website Weaknesses (e.g., outdated software, missing security headers like HTTPS, HSTS, CSP, X-Frame-Options)\n- Security Vulnerabilities (potential XSS, SQL injection, CSRF indicators)\n- Shadowdoor/Defacement Detection (links to illegal content, malicious domains)\n- Domain/IP Address: {server_info.get('ip_address', 'Unknown')}\n- Server Version: {server_info.get('server', 'Unknown')}\n- Content Analysis: Check for malicious scripts, phishing elements, or illegal content\n- Recommendations (only for detailed view)"
     
     try:
         response = ollama.generate(model=model, prompt=prompt)
@@ -486,19 +507,60 @@ def judge_evidence(text_result, vision_results, url, server_info, shadowdoor_lin
         
         # Extract confidence score
         confidence = None
+        illegal_rate = None
         lines = full_response.split('\n')
         for line in lines:
+            # Look for confidence score patterns
             if 'confidence' in line.lower():
                 import re
+                # Try to find a single number first
                 match = re.search(r'\b(\d{1,3})\b', line)
                 if match:
                     confidence = int(match.group(1))
                     if 0 <= confidence <= 100:
                         break
+                # If no single number, try to find range and take the higher value
+                match = re.search(r'(\d{1,3})\s*-\s*(\d{1,3})', line)
+                if match:
+                    confidence = int(match.group(2))  # Take the higher value
+                    if 0 <= confidence <= 100:
+                        break
+            
+            # Look for illegal rate patterns
+            elif 'illegal rate' in line.lower() or ('illegal' in line.lower() and 'rate' in line.lower()):
+                import re
+                match = re.search(r'\b(\d{1,3})\b', line)
+                if match:
+                    illegal_rate = int(match.group(1))
+                    if 0 <= illegal_rate <= 100:
+                        break
         
-        return full_response, confidence
+        # If illegal rate wasn't found, try to infer it from the content
+        if illegal_rate is None:
+            illegal_keywords = ['porn', 'gambling', 'casino', 'drugs', 'illegal', 'prohibited', 'sex', 'gamblers']
+            content_lower = full_response.lower()
+            illegal_score = 0
+            found_keywords = []
+            for keyword in illegal_keywords:
+                if keyword in content_lower:
+                    illegal_score += 15  # Reduced from 20 to be more conservative
+                    found_keywords.append(keyword)
+            
+            if found_keywords:
+                illegal_rate = min(illegal_score, 100)
+            else:
+                illegal_rate = 0  # Default to 0 if no illegal keywords found
+        
+        # Validate and set defaults
+        if confidence is None or not (0 <= confidence <= 100):
+            confidence = 50  # Neutral confidence if parsing fails
+        
+        if illegal_rate is None or not (0 <= illegal_rate <= 100):
+            illegal_rate = 0  # Default to safe if parsing fails
+        
+        return full_response, confidence, illegal_rate
     except Exception as e:
-        return f"Error: {str(e)}", None
+        return f"Error: {str(e)}", None, None
 
 def scan_site(url):
     """Scan a single site: fetch content, analyze with AI, return analysis results."""
@@ -531,6 +593,19 @@ def scan_site(url):
                               headers={'User-Agent': config.get_scanning_config()['user_agent']})
         response_time = time.time() - start_time_req
         
+        # Check for successful response
+        if response.status_code != 200:
+            result = {
+                'url': url, 
+                'error': f'HTTP {response.status_code}: Unable to access webpage content',
+                'server_info': {
+                    'status_code': response.status_code,
+                    'response_time': round(response_time, 2)
+                }
+            }
+            db.save_scan_result(result)
+            return result
+        
         # Check for redirects
         if response.url != url:
             # Emit new URL for scanning
@@ -549,6 +624,28 @@ def scan_site(url):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         text_content = soup.get_text()
+        
+        # Check if this appears to be an error page or blocked content
+        error_indicators = ['access denied', 'forbidden', 'blocked', '403', 'error', 'cloudflare', 'captcha']
+        title = soup.find('title')
+        title_text = title.get_text().lower() if title else ''
+        body_text = text_content.lower()[:500]  # Check first 500 chars
+        
+        is_error_page = any(indicator in title_text or indicator in body_text for indicator in error_indicators)
+        
+        if is_error_page and len(text_content.strip()) < 200:
+            result = {
+                'url': url, 
+                'error': 'Content appears to be an error or blocked page',
+                'server_info': {
+                    'server': response.headers.get('Server', 'Unknown'),
+                    'status_code': response.status_code,
+                    'response_time': round(response_time, 2),
+                    'content_length': len(response.text)
+                }
+            }
+            db.save_scan_result(result)
+            return result
         
         # Extract images with better URL handling
         images = []
@@ -685,10 +782,57 @@ def scan_site(url):
         current_scanning.remove(url) if url in current_scanning else None
 
 def parallel_scan(sites, max_workers=8):  # Increased from 3 to 8 for faster processing
-    """Scan multiple sites in parallel for analysis, then judge sequentially."""
+    """Scan multiple sites in parallel and judge immediately after each analysis completes."""
     global scanned_count, potential_count, dangerous_count, scan_results, current_scanning, start_time, stop_scan, is_scanning, total_sites, total_scanning_sites
-    analysis_results = []
+    judged_results = []
     start_time = time.time()
+    
+    def judge_single_result(result):
+        if 'error' in result:
+            return result
+        
+        # Emit current judging status
+        emit_data = {
+            'url': result['url'], 
+            'judgment': 'Judging in Progress', 
+            'text_result': result['text_result'], 
+            'vision_results': result['vision_results'],
+            'server_info': result.get('server_info', {})
+        }
+        socketio.emit('scan_update', emit_data)
+        
+        final_judgment, confidence, illegal_rate = judge_evidence(
+            result['text_result'], 
+            result['vision_results'], 
+            result['url'], 
+            result.get('server_info', {}),
+            result.get('shadowdoor_links', []),
+            result.get('vulnerabilities', []),
+            OLLAMA_MODELS['judge']
+        )
+        if not final_judgment or final_judgment.strip() == '':
+            final_judgment = "Safe website - no malicious content detected"
+            confidence = 0
+            illegal_rate = 0
+        
+        # Update result with judgment, confidence, and illegal rate
+        result['judgment'] = final_judgment
+        result['confidence'] = confidence
+        result['illegal_rate'] = illegal_rate
+        
+        # Emit final result
+        emit_data = {
+            'url': result['url'], 
+            'judgment': final_judgment, 
+            'text_result': result['text_result'], 
+            'vision_results': result['vision_results'],
+            'server_info': result.get('server_info', {}),
+            'confidence': confidence,
+            'illegal_rate': illegal_rate
+        }
+        socketio.emit('scan_update', emit_data)
+        
+        return result
     
     # Remove duplicates from sites
     unique_sites = list(set(sites))
@@ -713,8 +857,35 @@ def parallel_scan(sites, max_workers=8):  # Increased from 3 to 8 for faster pro
                 site = futures[future]
                 current_scanning.remove(site) if site in current_scanning else None
                 result = future.result()
-                analysis_results.append(result)
-                # Don't increment scanned_count here - we'll do it after judgment
+                
+                # Immediately judge this result
+                judged_result = judge_single_result(result)
+                judged_results.append(judged_result)
+                
+                # Update counters immediately
+                if 'error' not in judged_result:
+                    # Parse judgment for counters
+                    judgment = judged_result['judgment'].lower()
+                    if 'malicious' in judgment or 'dangerous' in judgment:
+                        dangerous_count += 1
+                        # Learn new keywords
+                        new_keywords = judged_result.get('new_keywords', [])
+                        for kw in new_keywords:
+                            if kw not in MALICIOUS_KEYWORDS:
+                                MALICIOUS_KEYWORDS.add(kw)
+                    elif 'potential' in judgment or 'suspicious' in judgment:
+                        potential_count += 1
+                    
+                    # Increment scanned count for each completed scan
+                    scanned_count += 1
+                    
+                    # Emit dashboard counter updates in real-time
+                    socketio.emit('dashboard_update', {
+                        'scanned': scanned_count,
+                        'potential': potential_count, 
+                        'dangerous': dangerous_count,
+                        'found': total_sites
+                    })
                 
                 # Check for redirects in result
                 if 'server_info' in result and result.get('server_info', {}).get('final_url') and result['server_info']['final_url'] != result['url']:
@@ -722,7 +893,6 @@ def parallel_scan(sites, max_workers=8):  # Increased from 3 to 8 for faster pro
                     if new_url not in unique_sites and new_url not in [futures[f] for f in futures]:
                         unique_sites.append(new_url)
                         futures[executor.submit(scan_site, new_url)] = new_url
-                        global total_sites
                         total_sites += 1
                         socketio.emit('total_sites', total_sites)
                         # Emit queued for new URL
@@ -735,117 +905,12 @@ def parallel_scan(sites, max_workers=8):  # Increased from 3 to 8 for faster pro
                         }
                         socketio.emit('scan_update', emit_data)
                 
-                # Emit partial update (analysis done, pending judgment)
-                if 'error' in result:
-                    emit_data = {
-                        'url': result['url'], 
-                        'judgment': 'Error', 
-                        'text_result': 'Analysis failed due to error', 
-                        'vision_results': [], 
-                        'error': result['error'],
-                        'server_info': {}
-                    }
-                else:
-                    emit_data = {
-                        'url': result['url'], 
-                        'judgment': 'Judging in Progress', 
-                        'text_result': result['text_result'], 
-                        'vision_results': result['vision_results'],
-                        'server_info': result.get('server_info', {})
-                    }
-                socketio.emit('scan_update', emit_data)
-                emit_progress()
+                emit_progress()  # Emit progress after each completion
                 del futures[future]  # Remove completed future
                 break  # Process one at a time to allow adding new ones
     
-    # Now judge in parallel for faster processing
-    # Emit status that judging phase has started
-    socketio.emit('scan_status', {'scanning': True, 'phase': 'judging'})
-    
-    def judge_single_result(result):
-        if 'error' in result:
-            return result
-        
-        # Emit current judging status
-        emit_data = {
-            'url': result['url'], 
-            'judgment': 'Judging in Progress', 
-            'text_result': result['text_result'], 
-            'vision_results': result['vision_results'],
-            'server_info': result.get('server_info', {})
-        }
-        socketio.emit('scan_update', emit_data)
-        
-        final_judgment, confidence = judge_evidence(
-            result['text_result'], 
-            result['vision_results'], 
-            result['url'], 
-            result.get('server_info', {}),
-            result.get('shadowdoor_links', []),
-            result.get('vulnerabilities', []),
-            OLLAMA_MODELS['judge']
-        )
-        if not final_judgment or final_judgment.strip() == '':
-            final_judgment = "Safe website - no malicious content detected"
-            confidence = 0
-        
-        # Update result with judgment and confidence
-        result['judgment'] = final_judgment
-        result['confidence'] = confidence
-        
-        # Emit final result
-        emit_data = {
-            'url': result['url'], 
-            'judgment': final_judgment, 
-            'text_result': result['text_result'], 
-            'vision_results': result['vision_results'],
-            'server_info': result.get('server_info', {}),
-            'confidence': confidence
-        }
-        socketio.emit('scan_update', emit_data)
-        
-        return result
-    
-    # Use ThreadPoolExecutor for parallel judging
-    judged_results = []
-    with ThreadPoolExecutor(max_workers=min(4, len(analysis_results))) as executor:  # Limit to 4 concurrent judgments
-        futures = {executor.submit(judge_single_result, result): result for result in analysis_results}
-        for future in as_completed(futures):
-            if stop_scan:
-                break
-            judged_result = future.result()
-            judged_results.append(judged_result)
-    
-    # Process results for counters
-    for result in judged_results:
-        if 'error' not in result:
-            # Parse judgment for counters
-            judgment = result['judgment'].lower()
-            if 'malicious' in judgment or 'dangerous' in judgment:
-                dangerous_count += 1
-                # Learn new keywords
-                new_keywords = result.get('new_keywords', [])
-                for kw in new_keywords:
-                    if kw not in MALICIOUS_KEYWORDS:
-                        MALICIOUS_KEYWORDS.add(kw)
-            elif 'potential' in judgment or 'suspicious' in judgment:
-                potential_count += 1
-            
-            # Increment scanned count for each completed scan
-            scanned_count += 1
-            
-            # Emit dashboard counter updates in real-time
-            socketio.emit('dashboard_update', {
-                'scanned': scanned_count,
-                'potential': potential_count, 
-                'dangerous': dangerous_count,
-                'found': total_sites
-            })
-            emit_progress()  # Emit progress after each completion
-    
-    scan_results.extend(analysis_results)
+    scan_results.extend(judged_results)
     # No need to save results here - they're saved individually in scan_site
-    # save_scan_results()  # Save results after scan completes
     is_scanning = False
     socketio.emit('scan_status', {'scanning': False})
 
@@ -1530,6 +1595,7 @@ def home():
                             <tr>
                                 <th>🌐 URL</th>
                                 <th>📊 Confidence</th>
+                                <th>🚫 Illegal Rate</th>
                                 <th>⚖️ Security Status</th>
                                 <th>📝 Text Analysis</th>
                                 <th>👁️ Vision Analysis</th>
@@ -1682,7 +1748,8 @@ def home():
                     // Update row with safe judgment handling
                     const safeJudgment = data.judgment || 'Unknown';
                     existingRow.cells[1].innerHTML = data.confidence || 'N/A';
-                    existingRow.cells[2].innerHTML = safeJudgment;
+                    existingRow.cells[2].innerHTML = data.illegal_rate || 'N/A';
+                    existingRow.cells[3].innerHTML = safeJudgment;
                     // Simplify display for table
                     let textDisplay = safeJudgment === 'Queued' ? 'Queued' : (safeJudgment === 'Error' ? 'Error' : 'Done');
                     let visionDisplay = safeJudgment === 'Queued' ? 'Queued' : (safeJudgment === 'Error' ? 'Error' : 'Done');
@@ -1704,6 +1771,7 @@ def home():
                     row.innerHTML = `
                         <td><a href="#" class="url-link" data-url="${data.url || ''}">${data.url || 'Unknown URL'}</a></td>
                         <td>${data.confidence || 'N/A'}</td>
+                        <td>${data.illegal_rate || 'N/A'}</td>
                         <td>${safeJudgment}</td>
                         <td>${textDisplay}</td>
                         <td>${visionDisplay}</td>
@@ -1752,6 +1820,7 @@ def home():
                     row.innerHTML = `
                         <td><a href="#" class="url-link" data-url="${result.url || ''}">${result.url || 'Unknown URL'}</a></td>
                         <td>${result.confidence || 'N/A'}</td>
+                        <td>${result.illegal_rate || 'N/A'}</td>
                         <td>${judgment}</td>
                         <td>${textDisplay}</td>
                         <td>${visionDisplay}</td>
@@ -1877,6 +1946,10 @@ def home():
                     <div class="detail-section">
                         <div class="detail-label">Confidence Score:</div>
                         ${data.confidence || 'N/A'}
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">🚫 Illegal Rate:</div>
+                        ${data.illegal_rate || 'N/A'}
                     </div>
                     <div class="detail-section">
                         <div class="detail-label">Judgment:</div>
@@ -2023,7 +2096,7 @@ def home():
                 // Top Domains
                 const domainStats = data.domain_stats || {};
                 let domainHtml = '<table style="width: 100%; border-collapse: collapse;">';
-                domainHtml += '<tr><th style="border: 1px solid #ddd; padding: 8px;">Domain</th><th style="border: 1px solid #ddd; padding: 8px;">Scans</th><th style="border: 1px solid #ddd; padding: 8px;">Avg Confidence</th><th style="border: 1px solid #ddd; padding: 8px;">Risk Level</th></tr>';
+                domainHtml += '<tr><th style="border: 1px solid #ddd; padding: 8px;">Domain</th><th style="border: 1px solid #ddd; padding: 8px;">Scans</th><th style="border: 1px solid #ddd; padding: 8px;">Avg Confidence</th><th style="border: 1px solid #ddd; padding: 8px;">Avg Illegal Rate</th><th style="border: 1px solid #ddd; padding: 8px;">Risk Level</th></tr>';
                 
                 (domainStats.top_domains || []).slice(0, 10).forEach(domain => {
                     const riskColor = domain.dangerous_count > domain.total_scans * 0.5 ? '#dc3545' : 
@@ -2032,6 +2105,7 @@ def home():
                         <td style="border: 1px solid #ddd; padding: 8px;">${domain.domain}</td>
                         <td style="border: 1px solid #ddd; padding: 8px;">${domain.total_scans}</td>
                         <td style="border: 1px solid #ddd; padding: 8px;">${domain.avg_confidence}%</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${domain.avg_illegal_rate}%</td>
                         <td style="border: 1px solid #ddd; padding: 8px; color: ${riskColor};">${domain.dangerous_count > 0 ? 'High' : domain.potential_count > 0 ? 'Medium' : 'Low'}</td>
                     </tr>`;
                 });
