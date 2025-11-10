@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if page_title %}{{ page_title }} - {% endif %}C.A.K.R.A - Cybersecurity AI Scanner</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', path='/css/main.css') }}" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #0052cc;
+            --secondary-color: #243b53;
+            --success-color: #00875a;
+            --warning-color: #ffab00;
+            --danger-color: #de350b;
+            --dark-bg: #0d1b2a;
+            --card-bg: #1b263b;
+            --text-light: #f8f9fa;
+            --text-muted: #adb5bd;
+            --border-color: #495057;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, var(--dark-bg) 0%, var(--secondary-color) 100%);
+            color: var(--text-light);
+            min-height: 100vh;
+        }
+        
+        .navbar {
+            background: rgba(13, 27, 42, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .navbar-brand {
+            font-weight: 700;
+            color: var(--text-light) !important;
+            font-size: 1.5rem;
+        }
+        
+        .nav-link {
+            color: var(--text-muted) !important;
+            transition: color 0.3s ease;
+        }
+        
+        .nav-link:hover, .nav-link.active {
+            color: var(--primary-color) !important;
+        }
+        
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .btn-primary {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .btn-primary:hover {
+            background: #004494;
+            border-color: #004494;
+        }
+        
+        .form-control {
+            background: var(--dark-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-light);
+        }
+        
+        .form-control:focus {
+            background: var(--dark-bg);
+            border-color: var(--primary-color);
+            color: var(--text-light);
+            box-shadow: 0 0 0 0.2rem rgba(0, 82, 204, 0.25);
+        }
+        
+        .badge {
+            font-size: 0.75rem;
+        }
+        
+        .status-safe { background-color: var(--success-color); }
+        .status-warning { background-color: var(--warning-color); }
+        .status-danger { background-color: var(--danger-color); }
+        
+        .hero-section {
+            padding: 4rem 0;
+            text-align: center;
+        }
+        
+        .hero-title {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            background: linear-gradient(45deg, var(--primary-color), #00d4ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+        }
+        
+        .scan-card {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .loading-spinner {
+            display: none;
+        }
+        
+        .result-card {
+            margin-top: 2rem;
+            display: none;
+        }
+        
+        .risk-meter {
+            width: 100%;
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .risk-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            text-align: center;
+            padding: 1.5rem;
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark fixed-top">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-shield-alt me-2"></i>
+                C.A.K.R.A
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">
+                            <i class="fas fa-home me-1"></i>Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.url.path == '/scan' %}active{% endif %}" href="/scan">
+                            <i class="fas fa-search me-1"></i>Scan URL
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.url.path == '/results' %}active{% endif %}" href="/results">
+                            <i class="fas fa-list me-1"></i>Scan Results
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.url.path == '/payments' %}active{% endif %}" href="/payments">
+                            <i class="fas fa-credit-card me-1"></i>Payment Channels
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/api/v1/health" target="_blank">
+                            <i class="fas fa-heartbeat me-1"></i>API Status
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main style="margin-top: 76px;">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="mt-5 py-4 border-top" style="border-color: var(--border-color) !important;">
+        <div class="container text-center">
+            <p class="text-muted mb-0">
+                &copy; 2025 C.A.K.R.A - AI-Powered Cybersecurity Scanner. 
+                <span class="text-primary">Protecting the digital frontier.</span>
+            </p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', path='/js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

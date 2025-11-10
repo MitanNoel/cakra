@@ -1,0 +1,133 @@
+# CAKRA System vs Web Dashboard Feature Comparison
+
+## Overview
+This document compares the features available in the CAKRA backend system (cakra-system) versus the web dashboard frontend (cakra-web).
+
+## Backend System Features (cakra-system)
+
+### Core Capabilities
+- **AI-Powered Web Crawling**: Intelligent crawling with deep link analysis, anti-detection mechanisms, and resource-optimized parallel processing
+- **Multi-Modal Content Analysis**: 
+  - Text analysis using Qwen AI model
+  - Image processing with LLaVA Phi vision model
+  - JavaScript and dynamic content analysis
+  - Pattern recognition and classification
+- **Payment Channel Detection**:
+  - QRIS code identification
+  - E-wallet account detection (GoPay, OVO, DANA)
+  - Bank account pattern matching (BCA, Mandiri, BNI, BRI)
+  - Phone number correlation
+  - Transaction flow mapping
+- **Network Mapping & Analysis**:
+  - Infrastructure correlation
+  - Domain relationship analysis
+  - Hosting pattern detection
+  - Operator cluster identification
+- **Real-time Classification**:
+  - Gambling and illegal betting detection
+  - Scam and fraud detection
+  - Website defacement identification
+  - Harmful content categorization
+  - Confidence scoring (0-100%)
+
+### Technical Features
+- **CLI Interface**: Command-line tools for scanning URLs (`python -m cakra scan <url>`)
+- **RESTful API**: FastAPI-based endpoints for integration
+- **Database Storage**: Persistent storage of scan results and analysis data
+- **Multi-Agent Architecture**: Specialized agents for different analysis types
+- **Batch Processing**: Handle multiple URLs simultaneously
+- **Statistics & Reporting**: System metrics and detailed analysis reports
+- **Integration Ready**: API endpoints for government agencies and ISP coordination
+
+### Analysis Depth
+- **Content Analysis**: Deep semantic analysis of website content
+- **Payment Investigation**: Advanced pattern matching for financial transactions
+- **Network Intelligence**: Correlation analysis across domains and infrastructure
+- **Risk Assessment**: Comprehensive risk scoring and recommendations
+- **Evidence Documentation**: Detailed logging and reporting for legal purposes
+
+## Frontend Dashboard Features (cakra-web)
+
+### User Interface
+- **Dashboard Overview**: Metrics cards, trend charts, and recent activity
+- **Interactive Search**: Advanced filtering by domain, category, extension, operator, status
+- **Manual URL Analysis**: On-demand analysis tool for individual URLs
+- **Detailed Analysis Pages**: In-depth examination of specific domains
+- **Data Visualization**: Area charts for trends, pie charts for category distribution
+
+### User Experience
+- **Responsive Design**: Modern dark theme with glass effects
+- **Real-time Updates**: Live confidence scoring and status indicators
+- **Export Functionality**: CSV export for search results and analysis data
+- **Navigation**: Intuitive routing between dashboard, search, and analysis views
+- **Interactive Elements**: Clickable data grids, expandable sections, filter panels
+
+### Data Presentation
+- **Structured Judgment Display**: Visual representation of analysis results
+- **Confidence Badges**: Color-coded risk indicators (Low/Medium/High)
+- **Entity Detection**: Display of detected payment channels and accounts
+- **Recommendations**: Actionable insights and blocking suggestions
+
+## Features Missing in Web Dashboard
+
+### Actual Analysis Capabilities
+- **Real Web Crawling**: Web dashboard uses mock data; backend performs actual crawling
+- **AI Model Integration**: No connection to Ollama models for content analysis
+- **Payment Detection**: No actual QRIS/bank account/e-wallet detection
+- **Network Mapping**: No infrastructure correlation or operator clustering
+- **Database Persistence**: No real data storage or retrieval
+- **Multi-Modal Analysis**: Limited to basic text analysis simulation
+
+### Advanced Features
+- **CLI Tools**: No command-line interface for scanning
+- **API Endpoints**: No RESTful API for external integrations
+- **Batch Processing**: No capability to scan multiple URLs simultaneously
+- **Real-time Statistics**: No actual system metrics or reporting
+- **Agent Architecture**: No specialized analysis agents
+
+### Technical Depth
+- **Deep Content Analysis**: Web shows mock results; backend performs actual AI analysis
+- **Payment Investigation**: No real financial transaction analysis
+- **Risk Assessment**: Simulated confidence scores vs. actual AI evaluation
+- **Evidence Collection**: No real logging or legal documentation capabilities
+
+## Features Missing in Backend System
+
+### User Experience
+- **Visual Dashboard**: No graphical user interface for monitoring
+- **Interactive Search**: No user-friendly filtering and search interface
+- **Data Visualization**: No charts or visual representations of data
+- **Manual Analysis Tool**: No on-demand URL analysis interface
+- **Export Capabilities**: No CSV export functionality
+
+### Interface Features
+- **Web UI**: No browser-based interface for non-technical users
+- **Responsive Design**: No mobile-friendly or modern UI components
+- **Real-time Updates**: No live dashboard updates or notifications
+- **Navigation**: No intuitive routing between different views
+
+### User Accessibility
+- **Self-Service Analysis**: No way for users to manually analyze URLs
+- **Data Exploration**: No interactive browsing of analysis results
+- **Visual Feedback**: No progress indicators or status visualizations
+- **User Management**: No user accounts or access control
+
+## Integration Opportunities
+
+### Web Dashboard Enhancements
+- Connect to backend API for real data instead of mock data
+- Add real-time WebSocket connections for live updates
+- Implement user authentication and role-based access
+- Add bulk analysis capabilities
+- Integrate with backend statistics API
+
+### Backend System Enhancements
+- Add web-based administration interface
+- Implement user management and access control
+- Add scheduled scanning and automated workflows
+- Create visual reporting dashboards
+- Add export capabilities for analysis results
+
+## Conclusion
+
+The **backend system (cakra-system)** provides comprehensive AI-powered analysis capabilities with deep technical analysis, while the **web dashboard (cakra-web)** offers a user-friendly interface for data exploration and manual analysis. The web dashboard currently serves as a demonstration interface using mock data, while the backend system contains the actual analysis engine. Full integration would combine the best of both worlds: powerful AI analysis with an intuitive user interface.

@@ -1,0 +1,299 @@
+# CAKRA Web Dashboard Integration Adjustments
+
+## Overview
+To integrate the web dashboard with the backend system, several key adjustments are needed to replace mock data with real API calls and align data structures.
+
+## 1. API Configuration Setup
+
+**File**: `cakra-web/src/lib/api.js` (create new)
+```javascript
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+export const api = {
+  async getScanResults(params = {}) {
+    const query = new URLSearchParams(params);
+    const response = await fetch(`${API_BASE_URL}/api/v1/scan-results?${query}`);
+    return response.json();
+  },
+
+  async getScanResult(url) {
+    const response = await fetch(`${API_BASE_URL}/api/v1/scan-results/${encodeURIComponent(url)}`);
+    return response.json();
+  },
+
+  async scanUrl(url) {
+    const response = await fetch(`${API_BASE_URL}/api/v1/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    return response.json();
+  },
+
+  async getStatistics() {
+    const response = await fetch(`${API_BASE_URL}/api/v1/statistics`);
+    return response.json();
+  }
+};
+```
+
+## 2. Data Structure Transformation
+
+**File**: `cakra-web/src/utils/dataTransformers.js` (create new)
+```javascript
+// Transform backend API response to frontend expected format
+export const transformScanResult = (apiResult) => {
+  return {
+    id: Date.now(), // Generate ID or use from DB
+    domain: apiResult.url,
+    kategori: apiResult.content_analysis?.category || 'unknown',
+    confidence: apiResult.content_analysis?.confidence / 100 || 0,
+    operator_hosting: apiResult.network_analysis?.operator || 'Unknown',
+    crawl_timestamp: apiResult.timestamp,
+    status: apiResult.error ? 'failed' : 'success',
+    entities_detected: apiResult.payment_analysis?.payment_channels?.map(ch => 
+      `${ch.type}:${ch.identifier}`
+    ) || [],
+    structured_judgment: {
+      illegal_rate: apiResult.content_analysis?.illegal_rate || 0,
+      status: apiResult.content_analysis?.illegal_rate > 50 ? 'Malicious' : 'Safe',
+      domain_ip: apiResult.scout_analysis?.ip || 'Unknown',
+      server_version: apiResult.scout_analysis?.server_version || 'Unknown',
+      weaknesses: apiResult.scout_analysis?.weaknesses || [],
+      defacement_detected: apiResult.content_analysis?.defacement_detected || false,
+      suspicious_scripts: apiResult.scout_analysis?.suspicious_scripts || [],
+      recommendations: apiResult.report?.recommendations || []
+    }
+  };
+};
+
+export const transformStatistics = (apiStats) => {
+  return {
+    totalDomains: apiStats.total_scans || 0,
+    flaggedCategories: apiStats.illegal_sites || 0,
+    successRate: apiStats.success_rate || 0,
+    todaysCrawls: apiStats.recent_scans || 0
+  };
+};
+```
+
+## 3. Update Dashboard Component
+
+**File**: `cakra-web/src/pages/Dashboard.jsx`
+- Replace `mockCrawlData` imports with API calls
+- Add loading states and error handling
+- Use `transformScanResult` for data formatting
+
+```javascript
+// Replace mock imports
+import { api } from '@/lib/api';
+import { transformScanResult, transformStatistics } from '@/utils/dataTransformers';
+
+// Add state management
+const [crawlData, setCrawlData] = useState([]);
+const [metrics, setMetrics] = useState({});
+const [loading, setLoading] = useState(true);
+const [error, setError] = useState(null);
+
+// Add useEffect for data fetching
+useEffect(() => {
+  const fetchData = async () => {
+    try {
+      const [results, stats] = await Promise.all([
+        api.getScanResults({ limit: 10 }),
+        api.getStatistics()
+      ]);
+      
+      const transformedResults = results.map(transformScanResult);
+      const transformedStats = transformStatistics(stats);
+      
+      setCrawlData(transformedResults);
+      setMetrics(transformedStats);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  fetchData();
+}, []);
+```
+
+## 4. Update Search Component
+
+**File**: `cakra-web/src/pages/Search.jsx`
+- Replace mock data with API calls
+- Implement real filtering using backend query parameters
+- Add search functionality
+
+```javascript
+// Update data fetching
+const fetchSearchResults = async () => {
+  setLoading(true);
+  try {
+    const params = {
+      limit: 100,
+      // Map frontend filters to backend parameters
+      classification: filters.categories.length > 0 ? filters.categories[0] : undefined,
+      // Add other filter mappings
+    };
+    
+    const results = await api.getScanResults(params);
+    const transformed = results.map(transformScanResult);
+    setFilteredData(transformed);
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+## 5. Update Manual Analysis Component
+
+**File**: `cakra-web/src/components/ManualAnalysis.jsx`
+- Replace mock analysis with real API call
+- Add proper loading states
+
+```javascript
+const handleAnalyze = async () => {
+  if (!url) return;
+  
+  setIsLoading(true);
+  setResult(null);
+  
+  try {
+    const apiResult = await api.scanUrl(url);
+    const transformed = transformScanResult(apiResult);
+    
+    setResult({
+      status: transformed.structured_judgment.status,
+      confidence: transformed.confidence
+    });
+  } catch (err) {
+    setResult({ error: err.message });
+  } finally {
+    setIsLoading(false);
+  }
+};
+```
+
+## 6. Update Analysis Component
+
+**File**: `cakra-web/src/pages/Analysis.jsx`
+- Fetch individual scan results from API
+- Handle URL parameter routing
+
+```javascript
+useEffect(() => {
+  const fetchAnalysis = async () => {
+    if (!domain) return;
+    
+    try {
+      const result = await api.getScanResult(domain);
+      const transformed = transformScanResult(result);
+      setDomainData(transformed);
+    } catch (err) {
+      setError('Domain analysis not found');
+    }
+  };
+  
+  fetchAnalysis();
+}, [domain]);
+```
+
+## 7. Add Environment Configuration
+
+**File**: `cakra-web/.env`
+```
+REACT_APP_API_URL=http://localhost:5000
+```
+
+## 8. Update Export Functionality
+
+**File**: `cakra-web/src/components/ExportModal.jsx`
+- Modify to export real data from API
+- Add CSV generation from actual results
+
+## 9. Add Error Boundaries and Loading States
+
+**File**: `cakra-web/src/components/ErrorBoundary.jsx` (create new)
+```javascript
+import React from 'react';
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-boundary">
+          <h2>Something went wrong</h2>
+          <p>{this.state.error?.message}</p>
+          <button onClick={() => this.setState({ hasError: false })}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default ErrorBoundary;
+```
+
+## 10. Update Package.json Scripts
+
+**File**: `cakra-web/package.json`
+```json
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "vite --host 0.0.0.0"
+  }
+}
+```
+
+## 11. CORS Configuration
+
+Ensure backend allows requests from frontend:
+**File**: `cakra-system/cakra/api/main.py`
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+## 12. Testing Integration
+
+1. Start backend: `cd cakra-system && python -m cakra serve`
+2. Start frontend: `cd cakra-web && npm run dev`
+3. Test API connectivity
+4. Verify data flows correctly
+5. Test error scenarios
+
+## Summary of Changes
+
+- **API Layer**: Create centralized API client
+- **Data Transformation**: Convert backend responses to frontend format
+- **State Management**: Replace mock data with real API calls
+- **Error Handling**: Add proper error boundaries and loading states
+- **Configuration**: Environment variables for API URLs
+- **CORS**: Enable cross-origin requests
+
+These adjustments will fully integrate the web dashboard with the backend system, replacing all mock functionality with real AI-powered analysis capabilities.

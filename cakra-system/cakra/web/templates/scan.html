@@ -1,0 +1,444 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-search me-2"></i>URL Scanner</h2>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+                        <li class="breadcrumb-item active">Scan URL</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0">
+                        <i class="fas fa-globe me-2"></i>Website Security Scan
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <form id="scanForm">
+                        <div class="mb-4">
+                            <label for="targetUrl" class="form-label">Target URL</label>
+                            <div class="input-group input-group-lg">
+                                <span class="input-group-text">
+                                    <i class="fas fa-link"></i>
+                                </span>
+                                <input type="url" class="form-control" id="targetUrl" 
+                                       placeholder="https://example.com" required>
+                            </div>
+                            <div class="form-text">
+                                Enter the complete URL including http:// or https://
+                            </div>
+                        </div>
+
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <label for="scanPriority" class="form-label">Scan Priority</label>
+                                <select class="form-select" id="scanPriority">
+                                    <option value="normal" selected>Normal</option>
+                                    <option value="high">High Priority</option>
+                                    <option value="low">Low Priority</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Scan Options</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="deepScan" checked>
+                                    <label class="form-check-label" for="deepScan">
+                                        Deep Content Analysis
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="paymentScan" checked>
+                                    <label class="form-check-label" for="paymentScan">
+                                        Payment Channel Detection
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fas fa-search me-2"></i>Start Security Scan
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Scan Progress -->
+            <div class="card mt-4" id="scanProgress" style="display: none;">
+                <div class="card-body">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="spinner-border text-primary me-3" role="status">
+                            <span class="visually-hidden">Scanning...</span>
+                        </div>
+                        <div>
+                            <h5 class="mb-1">Scanning in Progress</h5>
+                            <p class="text-muted mb-0" id="scanStatus">Initializing scan...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: 0%" id="progressBar"></div>
+                    </div>
+                    
+                    <div class="row text-center">
+                        <div class="col-3">
+                            <div class="scan-step" id="step1">
+                                <i class="fas fa-search fa-2x text-muted"></i>
+                                <div class="small mt-1">Scout</div>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="scan-step" id="step2">
+                                <i class="fas fa-eye fa-2x text-muted"></i>
+                                <div class="small mt-1">Analyze</div>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="scan-step" id="step3">
+                                <i class="fas fa-credit-card fa-2x text-muted"></i>
+                                <div class="small mt-1">Payments</div>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="scan-step" id="step4">
+                                <i class="fas fa-file-alt fa-2x text-muted"></i>
+                                <div class="small mt-1">Report</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scan Results -->
+            <div class="card mt-4" id="scanResults" style="display: none;">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">
+                        <i class="fas fa-chart-bar me-2"></i>Scan Results
+                    </h4>
+                    <button class="btn btn-outline-primary btn-sm" onclick="downloadReport()">
+                        <i class="fas fa-download me-1"></i>Download Report
+                    </button>
+                </div>
+                <div class="card-body" id="resultsContent">
+                    <!-- Results will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('scanForm').addEventListener('submit', handleScan);
+});
+
+let currentScanResult = null;
+
+async function handleScan(event) {
+    event.preventDefault();
+    
+    const url = document.getElementById('targetUrl').value;
+    const priority = document.getElementById('scanPriority').value;
+    
+    // Show progress
+    showScanProgress();
+    
+    try {
+        await performScan(url, priority);
+    } catch (error) {
+        console.error('Scan error:', error);
+        showScanError(error.message);
+    }
+}
+
+function showScanProgress() {
+    document.getElementById('scanProgress').style.display = 'block';
+    document.getElementById('scanResults').style.display = 'none';
+    
+    // Simulate progress
+    simulateProgress();
+}
+
+function simulateProgress() {
+    const steps = [
+        { id: 'step1', message: 'Scouting website...', progress: 25 },
+        { id: 'step2', message: 'Analyzing content...', progress: 50 },
+        { id: 'step3', message: 'Detecting payment channels...', progress: 75 },
+        { id: 'step4', message: 'Generating report...', progress: 100 }
+    ];
+    
+    let currentStep = 0;
+    
+    const interval = setInterval(() => {
+        if (currentStep < steps.length) {
+            const step = steps[currentStep];
+            
+            // Update progress bar
+            document.getElementById('progressBar').style.width = step.progress + '%';
+            document.getElementById('scanStatus').textContent = step.message;
+            
+            // Update step icon
+            const stepElement = document.getElementById(step.id);
+            stepElement.querySelector('i').className = 'fas fa-check-circle fa-2x text-success';
+            
+            currentStep++;
+        } else {
+            clearInterval(interval);
+        }
+    }, 2000);
+}
+
+async function performScan(url, priority) {
+    const response = await fetch('/api/v1/scan', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `url=${encodeURIComponent(url)}&priority=${priority}`
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok) {
+        throw new Error(result.detail || 'Scan failed');
+    }
+    
+    currentScanResult = result;
+    
+    // Wait for progress simulation to complete
+    setTimeout(() => {
+        showScanResults(result);
+    }, 8000);
+}
+
+function showScanResults(result) {
+    document.getElementById('scanProgress').style.display = 'none';
+    document.getElementById('scanResults').style.display = 'block';
+    
+    const riskScore = calculateRiskScore(result);
+    const riskLevel = getRiskLevel(riskScore);
+    
+    const resultsHTML = `
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="text-center p-3 bg-dark rounded">
+                    <div class="display-4 fw-bold ${getRiskColorClass(riskScore)}">${riskScore}</div>
+                    <div class="text-muted">Risk Score</div>
+                    <div class="mt-2">
+                        <span class="badge ${getRiskBadgeClass(riskScore)}">${riskLevel}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <h5>Scan Summary</h5>
+                <ul class="list-unstyled">
+                    <li><i class="fas fa-globe text-primary me-2"></i><strong>URL:</strong> ${result.url}</li>
+                    <li><i class="fas fa-clock text-primary me-2"></i><strong>Scanned:</strong> ${new Date(result.timestamp).toLocaleString()}</li>
+                    <li><i class="fas fa-shield-alt text-primary me-2"></i><strong>Status:</strong> ${getStatusBadge(result)}</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header">
+                        <h6><i class="fas fa-eye me-2"></i>Content Analysis</h6>
+                    </div>
+                    <div class="card-body">
+                        ${formatContentAnalysis(result.content_analysis)}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header">
+                        <h6><i class="fas fa-credit-card me-2"></i>Payment Detection</h6>
+                    </div>
+                    <div class="card-body">
+                        ${formatPaymentAnalysis(result.payment_analysis)}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-12">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header">
+                        <h6><i class="fas fa-network-wired me-2"></i>Network Analysis</h6>
+                    </div>
+                    <div class="card-body">
+                        ${formatNetworkAnalysis(result.network_analysis)}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-12">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header">
+                        <h6><i class="fas fa-file-alt me-2"></i>Intelligence Report</h6>
+                    </div>
+                    <div class="card-body">
+                        ${formatReport(result.report)}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('resultsContent').innerHTML = resultsHTML;
+}
+
+function showScanError(message) {
+    document.getElementById('scanProgress').style.display = 'none';
+    document.getElementById('scanResults').style.display = 'block';
+    
+    document.getElementById('resultsContent').innerHTML = `
+        <div class="alert alert-danger">
+            <h5><i class="fas fa-exclamation-triangle me-2"></i>Scan Failed</h5>
+            <p class="mb-0">${message}</p>
+            <button class="btn btn-outline-danger mt-3" onclick="location.reload()">
+                <i class="fas fa-redo me-1"></i>Try Again
+            </button>
+        </div>
+    `;
+}
+
+function calculateRiskScore(result) {
+    // Simple risk calculation based on available data
+    let score = 0;
+    
+    if (result.content_analysis?.risk_level === 'high') score += 40;
+    else if (result.content_analysis?.risk_level === 'medium') score += 20;
+    
+    if (result.payment_analysis?.channels_found > 0) score += 30;
+    
+    if (result.network_analysis?.suspicious_indicators > 0) score += 20;
+    
+    return Math.min(score, 100);
+}
+
+function getRiskLevel(score) {
+    if (score >= 70) return 'High Risk';
+    if (score >= 40) return 'Medium Risk';
+    return 'Low Risk';
+}
+
+function getRiskColorClass(score) {
+    if (score >= 70) return 'text-danger';
+    if (score >= 40) return 'text-warning';
+    return 'text-success';
+}
+
+function getRiskBadgeClass(score) {
+    if (score >= 70) return 'badge bg-danger';
+    if (score >= 40) return 'badge bg-warning';
+    return 'badge bg-success';
+}
+
+function getStatusBadge(result) {
+    const score = calculateRiskScore(result);
+    if (score >= 70) return '<span class="badge bg-danger">Threat Detected</span>';
+    if (score >= 40) return '<span class="badge bg-warning">Suspicious</span>';
+    return '<span class="badge bg-success">Clean</span>';
+}
+
+function formatContentAnalysis(analysis) {
+    if (!analysis) return '<p class="text-muted">No content analysis available</p>';
+    
+    return `
+        <div class="mb-3">
+            <strong>Classification:</strong> 
+            <span class="badge bg-info">${analysis.category || 'Unknown'}</span>
+        </div>
+        <div class="mb-3">
+            <strong>Confidence:</strong> ${analysis.confidence || 0}%
+        </div>
+        <div>
+            <strong>Suspicious Elements:</strong>
+            <ul class="mt-2">
+                ${(analysis.suspicious_elements || []).map(el => `<li>${el}</li>`).join('') || '<li class="text-muted">None detected</li>'}
+            </ul>
+        </div>
+    `;
+}
+
+function formatPaymentAnalysis(analysis) {
+    if (!analysis) return '<p class="text-muted">No payment analysis available</p>';
+    
+    return `
+        <div class="mb-3">
+            <strong>Channels Found:</strong> ${analysis.channels_found || 0}
+        </div>
+        <div class="mb-3">
+            <strong>QRIS Codes:</strong> ${analysis.qris_codes?.length || 0}
+        </div>
+        <div>
+            <strong>Payment Methods:</strong>
+            <ul class="mt-2">
+                ${(analysis.payment_methods || []).map(method => `<li>${method}</li>`).join('') || '<li class="text-muted">None detected</li>'}
+            </ul>
+        </div>
+    `;
+}
+
+function formatNetworkAnalysis(analysis) {
+    if (!analysis) return '<p class="text-muted">No network analysis available</p>';
+    
+    return `
+        <div class="mb-3">
+            <strong>IP Address:</strong> ${analysis.ip_address || 'Unknown'}
+        </div>
+        <div class="mb-3">
+            <strong>Location:</strong> ${analysis.location || 'Unknown'}
+        </div>
+        <div>
+            <strong>DNS Records:</strong> ${analysis.dns_records?.length || 0} found
+        </div>
+    `;
+}
+
+function formatReport(report) {
+    if (!report || !report.report) return '<p class="text-muted">No report available</p>';
+    
+    return `<div class="report-content">${report.report.replace(/\n/g, '<br>')}</div>`;
+}
+
+function downloadReport() {
+    if (!currentScanResult) return;
+    
+    const reportData = {
+        url: currentScanResult.url,
+        timestamp: currentScanResult.timestamp,
+        risk_score: calculateRiskScore(currentScanResult),
+        content_analysis: currentScanResult.content_analysis,
+        payment_analysis: currentScanResult.payment_analysis,
+        network_analysis: currentScanResult.network_analysis,
+        report: currentScanResult.report
+    };
+    
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cakra-report-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

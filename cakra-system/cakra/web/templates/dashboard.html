@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="hero-section">
+    <div class="container">
+        <h1 class="hero-title">C.A.K.R.A</h1>
+        <p class="hero-subtitle">
+            AI-Powered Cybersecurity Analysis and Risk Reconnaissance Assistant
+        </p>
+        <p class="lead text-muted">
+            Advanced threat detection using artificial intelligence to scan, analyze, and report on potentially malicious websites.
+        </p>
+    </div>
+</div>
+
+<div class="container">
+    <!-- Quick Scan Section -->
+    <div class="row justify-content-center mb-5">
+        <div class="col-lg-8">
+            <div class="card scan-card">
+                <div class="card-body p-4">
+                    <h3 class="card-title text-center mb-4">
+                        <i class="fas fa-search-plus text-primary me-2"></i>
+                        Quick URL Scan
+                    </h3>
+                    <form id="quickScanForm">
+                        <div class="input-group input-group-lg">
+                            <span class="input-group-text bg-dark border-secondary">
+                                <i class="fas fa-globe"></i>
+                            </span>
+                            <input type="url" class="form-control" id="quickScanUrl" 
+                                   placeholder="Enter URL to scan (e.g., https://example.com)" required>
+                            <button class="btn btn-primary px-4" type="submit">
+                                <i class="fas fa-search me-2"></i>Scan Now
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <!-- Loading State -->
+                    <div class="loading-spinner text-center mt-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Scanning...</span>
+                        </div>
+                        <p class="mt-3 text-muted">Analyzing website security...</p>
+                    </div>
+                    
+                    <!-- Results -->
+                    <div class="result-card">
+                        <div class="card mt-4">
+                            <div class="card-body">
+                                <div id="scanResults"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Section -->
+    <div class="stats-grid">
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="stat-number text-primary" id="totalScans">-</div>
+                <div class="stat-label">Total Scans</div>
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="stat-number text-danger" id="threatsDetected">-</div>
+                <div class="stat-label">Threats Detected</div>
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="stat-number text-warning" id="paymentChannels">-</div>
+                <div class="stat-label">Payment Channels</div>
+            </div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="stat-number text-success" id="safeSites">-</div>
+                <div class="stat-label">Safe Sites</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Results -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">
+                        <i class="fas fa-clock me-2"></i>Recent Scan Results
+                    </h4>
+                    <a href="/results" class="btn btn-outline-primary btn-sm">
+                        View All <i class="fas fa-arrow-right ms-1"></i>
+                    </a>
+                </div>
+                <div class="card-body">
+                    <div id="recentResults">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Load dashboard data
+    loadStatistics();
+    loadRecentResults();
+    
+    // Quick scan form handler
+    document.getElementById('quickScanForm').addEventListener('submit', handleQuickScan);
+});
+
+async function loadStatistics() {
+    try {
+        const response = await fetch('/api/v1/statistics');
+        const stats = await response.json();
+        
+        document.getElementById('totalScans').textContent = stats.total_scans || 0;
+        document.getElementById('threatsDetected').textContent = stats.threats_detected || 0;
+        document.getElementById('paymentChannels').textContent = stats.payment_channels || 0;
+        document.getElementById('safeSites').textContent = stats.safe_sites || 0;
+    } catch (error) {
+        console.error('Error loading statistics:', error);
+    }
+}
+
+async function loadRecentResults() {
+    try {
+        const response = await fetch('/api/v1/scan-results?limit=5');
+        const results = await response.json();
+        
+        const container = document.getElementById('recentResults');
+        
+        if (results.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-4 text-muted">
+                    <i class="fas fa-search fa-3x mb-3"></i>
+                    <p>No scan results yet. <a href="/scan">Start your first scan!</a></p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = results.map(result => `
+            <div class="d-flex justify-content-between align-items-center py-3 border-bottom border-secondary">
+                <div>
+                    <div class="fw-bold">${result.url}</div>
+                    <small class="text-muted">${new Date(result.timestamp).toLocaleString()}</small>
+                </div>
+                <div>
+                    ${getRiskBadge(result.risk_score || 0)}
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Error loading recent results:', error);
+        document.getElementById('recentResults').innerHTML = `
+            <div class="text-center py-4 text-danger">
+                <i class="fas fa-exclamation-triangle"></i>
+                Error loading results
+            </div>
+        `;
+    }
+}
+
+async function handleQuickScan(event) {
+    event.preventDefault();
+    
+    const url = document.getElementById('quickScanUrl').value;
+    const loadingSpinner = document.querySelector('.loading-spinner');
+    const resultCard = document.querySelector('.result-card');
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    
+    // Show loading state
+    loadingSpinner.style.display = 'block';
+    resultCard.style.display = 'none';
+    submitBtn.disabled = true;
+    
+    try {
+        const response = await fetch('/api/v1/scan', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `url=${encodeURIComponent(url)}`
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.detail || 'Scan failed');
+        }
+        
+        displayScanResult(result);
+        
+    } catch (error) {
+        console.error('Scan error:', error);
+        displayScanError(error.message);
+    } finally {
+        loadingSpinner.style.display = 'none';
+        submitBtn.disabled = false;
+    }
+}
+
+function displayScanResult(result) {
+    const container = document.getElementById('scanResults');
+    const riskScore = result.risk_score || 0;
+    
+    container.innerHTML = `
+        <div class="mb-4">
+            <h5 class="text-primary mb-3">
+                <i class="fas fa-chart-line me-2"></i>Scan Complete
+            </h5>
+            <div class="mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span>Risk Score</span>
+                    <span class="fw-bold">${riskScore}/100</span>
+                </div>
+                <div class="risk-meter">
+                    <div class="risk-fill ${getRiskClass(riskScore)}" style="width: ${riskScore}%"></div>
+                </div>
+            </div>
+            
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="p-3 bg-dark rounded">
+                        <h6><i class="fas fa-eye me-2"></i>Content Analysis</h6>
+                        <p class="text-muted small mb-0">
+                            ${result.content_analysis?.summary || 'Analysis completed'}
+                        </p>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="p-3 bg-dark rounded">
+                        <h6><i class="fas fa-credit-card me-2"></i>Payment Detection</h6>
+                        <p class="text-muted small mb-0">
+                            ${result.payment_analysis?.channels_found || 0} payment channels detected
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-3 text-center">
+                <a href="/results" class="btn btn-outline-primary">
+                    View Detailed Report <i class="fas fa-external-link-alt ms-1"></i>
+                </a>
+            </div>
+        </div>
+    `;
+    
+    document.querySelector('.result-card').style.display = 'block';
+}
+
+function displayScanError(message) {
+    const container = document.getElementById('scanResults');
+    container.innerHTML = `
+        <div class="alert alert-danger">
+            <h5><i class="fas fa-exclamation-triangle me-2"></i>Scan Failed</h5>
+            <p class="mb-0">${message}</p>
+        </div>
+    `;
+    document.querySelector('.result-card').style.display = 'block';
+}
+
+function getRiskBadge(score) {
+    if (score >= 70) return `<span class="badge status-danger">High Risk</span>`;
+    if (score >= 40) return `<span class="badge status-warning">Medium Risk</span>`;
+    return `<span class="badge status-safe">Low Risk</span>`;
+}
+
+function getRiskClass(score) {
+    if (score >= 70) return 'bg-danger';
+    if (score >= 40) return 'bg-warning';
+    return 'bg-success';
+}
+</script>
+{% endblock %}

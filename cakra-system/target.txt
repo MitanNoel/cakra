@@ -1,0 +1,55 @@
+AI-Powered System for Illegal Website & Gambling Detection
+ in Indonesia
+ Indonesia is facing a rapid rise in illegal online activities such as gambling websites,
+ defacement of government and academic sites, and the use of digital payments for unlawful
+ purposes. Traditional blocking methods (domain/IP takedowns) are reactive and often slow,
+ allowing operators to quickly shift to new domains. This plan introduces an AI-powered system
+ designed to strengthen Indonesia’s national cybersecurity posture by detecting, analyzing, and
+ mapping illegal online operations. The approach focuses not only on websites but also on
+ payment channels and operator networks, which are harder to replace and therefore more
+ effective choke points.
+ Goals of the System
+ • Detect and classify illegal websites (gambling, scams, harmful tutorials).
+ • Identify payment channels (QRIS, e-wallets, phone numbers) used by operators.
+ • Map operator ecosystems (shared servers, domain clusters, link networks).
+ • Generate actionable intelligence reports for Kominfo and partners.
+ • Strengthen trust in Indonesian online spaces (government, education, business).
+ Global Benchmarks & Competitors
+ Other countries and organizations are already deploying similar systems for national security
+ and online fraud detection: - Singapore’s **Cyber Security Agency (CSA)** works closely with
+ banks and ISPs to block illegal domains and track payment abuse. - Europol and Interpol have
+ run international operations shutting down gambling and scam websites by mapping hosting
+ providers and payment networks. - China’s **Great Firewall** incorporates automated
+ monitoring and domain blocking at scale, including gambling content. - Private companies
+ such as **Group-IB** and **Recorded Future** sell AI-powered monitoring platforms to
+ governments worldwide. This means Indonesia is not alone in facing the threat—competitors
+ and allies alike are already using advanced AI-based monitoring to protect their digital
+ ecosystems.
+ Why This Matters for Indonesia
+ • Protect citizens from gambling, scams, and harmful online material.
+ • Safeguard government and academic credibility from defacement attacks.
+ • Disrupt illegal operators at their financial choke points (e-wallets, QRIS, bank accounts).
+ • Build stronger cooperation between Kominfo, ISPs, and payment providers.
+ • Elevate Indonesia’s cybersecurity standing to match global best practices.
+ Planned Approach
+ The system will use AI-based crawling and analysis to automatically find illegal domains, follow
+ their link networks, and extract payment information. Suspicious websites will be scored for
+ severity, clustered into operator groups, and matched with payment channels. Weekly
+ intelligence reports will summarize the findings in human-readable form, enabling Kominfo and
+ partners to act quickly—blocking domains, reporting wallets, and taking down hosting
+providers. This approach is proactive and scalable, reducing the chance of illegal operators
+ staying hidden in Indonesia’s online ecosystem.
+ By developing this system, Indonesia will not only counter current illegal activities but also
+ create a long-term foundation for defending against evolving online threats. With competitors
+ already deploying similar technologies worldwide, this project ensures that Indonesia does not
+ fall behind in the cybersecurity race
+
+ | Agent                    | Role                                                        | Tool / Model                                           | Resource Notes                                      |
+| ------------------------ | ----------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------- |
+| **Crawler / Scout**      | Gather websites, take screenshots, extract raw HTML & links | Python + Playwright / Selenium                         | Low CPU; sequential crawling to fit 4 cores         |
+| **Text Analyst**         | Classify website content (gambling, scams, defacement)      | Qwen-VL Lite (text input only)                         | \~3 GB RAM for inference; small batch size          |
+| **Visual Analyst**       | Detect banners, logos, or harmful images                    | LLaVA Mini or Qwen-VL Lite (image input)               | Resize images to 512×512 to fit RAM                 |
+| **Payment Investigator** | Extract QRIS codes, e-wallet numbers, bank info             | Tesseract OCR + Regex                                  | CPU only; low RAM                                   |
+| **Network Mapper**       | Build operator maps: shared domains, IPs, payment channels  | Python + NetworkX / Neo4j Lite                         | Low RAM; storage <10 GB                             |
+| **Evidence Evaluator**   | Assign severity & credibility scores                        | Qwen-VL Lite or rule-based logic                       | Lightweight scoring; fits CPU & RAM                 |
+| **Reporter / Clerk**     | Generate structured intelligence reports                    | Ollama text-only model (e.g., LLaMA 2 7B CPU-friendly) | \~3–4 GB RAM for inference; PDF generation optional |
