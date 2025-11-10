@@ -62,7 +62,7 @@ class Reporter(Agent):
         """
     
     async def initialize(self) -> None:
-        """Initialize the reporting model"""
+        """Initialize the reporting model (optional for startup)"""
         try:
             # Run the synchronous ollama.generate in a thread pool
             loop = asyncio.get_event_loop()
@@ -77,9 +77,10 @@ class Reporter(Agent):
             if not response or not response.get("response"):
                 raise RuntimeError("Report model not responding")
             self.is_initialized = True
+            logging.info("Reporter agent initialized successfully")
         except Exception as e:
-            logging.error(f"Reporter initialization error: {str(e)}")
-            raise
+            logging.warning(f"Reporter initialization failed (continuing without AI reporting): {str(e)}")
+            self.is_initialized = False  # Allow startup without models
     
     async def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate intelligence report from scan data"""

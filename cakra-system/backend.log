@@ -1,0 +1,46 @@
+nohup: ignoring input
+Starting CAKRA API server...
+INFO:     Started server process [34596]
+INFO:     Waiting for application startup.
+[18:02:15] INFO     HTTP Request: POST                           _client.py:1025
+                    http://127.0.0.1:11434/api/generate                         
+                    "HTTP/1.1 500 Internal Server Error"                        
+           WARNING  Model initialization failed (continuing        analyst.py:78
+                    without AI analysis): model requires more                   
+                    system memory than is currently available                   
+                    unable to load full model on GPU (status code:              
+                    500)                                                        
+           INFO     Investigator agent initialized            investigator.py:48
+                    successfully                                                
+           INFO     HTTP Request: POST                           _client.py:1025
+                    http://127.0.0.1:11434/api/generate                         
+                    "HTTP/1.1 500 Internal Server Error"                        
+           INFO     HTTP Request: POST                           _client.py:1025
+                    http://127.0.0.1:11434/api/generate                         
+                    "HTTP/1.1 500 Internal Server Error"                        
+           WARNING  Reporter initialization failed (continuing    reporter.py:82
+                    without AI reporting): model requires more                  
+                    system memory than is currently available                   
+                    unable to load full model on GPU (status                    
+                    code: 500)                                                  
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54440 - "POST /api/v1/test-scan?url=https://httpbin.org HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49438 - "GET /api/v1/scan-results?limit=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44794 - "GET /api/v1/scan-results?limit=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39836 - "GET /api/v1/scan-results?limit=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50636 - "GET /api/v1/scan-results?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41720 - "GET /api/v1/scan-results?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44720 - "GET /api/v1/scan-results?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36538 - "GET /api/v1/scan-results?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51342 - "HEAD /api/v1/scan-results?limit=1 HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:51170 - "GET /api/v1/scan-results?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51176 - "GET /api/v1/scan-results?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36592 - "GET /api/v1/scan-results?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55432 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55436 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57716 - "GET /api/v1/health HTTP/1.1" 404 Not Found
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [34596]

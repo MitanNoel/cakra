@@ -24,8 +24,8 @@ class ScoutConfig(BaseModel):
 
 class AnalystConfig(BaseModel):
     """Content analyst configuration"""
-    text_model: str = "qwen2:0.5b"
-    vision_model: str = "qwen2:0.5b"
+    text_model: str = "llama2:7b"
+    vision_model: str = "llama2:7b"
     batch_size: int = 4
     max_tokens: int = 2048
     temperature: float = 0.7
@@ -44,7 +44,7 @@ class MapperConfig(BaseModel):
 
 class ReporterConfig(BaseModel):
     """Report generator configuration"""
-    model: str = "qwen2:0.5b"
+    model: str = "llama2:7b"
     max_tokens: int = 2048
     temperature: float = 0.7
     batch_size: int = 1

@@ -40,14 +40,15 @@ class PaymentInvestigator(Agent):
         }
     
     async def initialize(self) -> None:
-        """Initialize Tesseract OCR if needed"""
+        """Initialize Tesseract OCR if needed (optional for startup)"""
         try:
             # Test Tesseract installation
             pytesseract.get_tesseract_version()
             self.is_initialized = True
+            logging.info("Investigator agent initialized successfully")
         except Exception as e:
-            logging.error(f"Tesseract initialization error: {str(e)}")
-            raise
+            logging.warning(f"Tesseract initialization failed (continuing without OCR analysis): {str(e)}")
+            self.is_initialized = False  # Allow startup without Tesseract
     
     async def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze content for payment channels"""

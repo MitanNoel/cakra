@@ -98,14 +98,12 @@ sudo systemctl start ollama  # Start Ollama as a system service
 # ollama serve
 
 # Pull required AI models
-ollama pull qwen2:7b
+ollama pull claude-sonnet-4.5
 ollama pull llava-phi3
-ollama pull llama2:7b
 
 # Install Required AI Models
-ollama pull qwen2:7b
+ollama pull claude-sonnet-4.5
 ollama pull llava-phi3
-ollama pull llama2:7b
 ```
 
 ## Usage
@@ -125,17 +123,16 @@ Core CLI Features:
 3. Intelligence Report Generation
 4. System Statistics and Monitoring
 
-### Web Interface and API Server
+### API Server
 
-Start the web server:
+Start the API server:
 ```bash
 python -m cakra serve
 ```
 
 Access Points:
-- Web Dashboard: http://localhost:5000
-- API Endpoints: http://localhost:5000/api/v1
-- API Documentation: http://localhost:5000/docs
+- API Endpoints: http://localhost:8000/api/v1
+- API Documentation: http://localhost:8000/docs
 
 ### Development Server
 

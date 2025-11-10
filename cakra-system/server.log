@@ -1,20 +1,80 @@
 nohup: ignoring input
-INFO:     Started server process [45448]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
+INFO:     Will watch for changes in these directories: ['/workspaces/cakra/cakra-system']
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:37314 - "POST /scan HTTP/1.1" 405 Method Not Allowed
-INFO:     127.0.0.1:40718 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43030 - "POST /api/v1/scan HTTP/1.1" 422 Unprocessable Entity
+INFO:     Started reloader process [81706] using StatReload
+INFO:     Started server process [81708]
+INFO:     Waiting for application startup.
+WARNING:root:Model initialization failed (continuing without AI analysis): model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+WARNING:root:Reporter initialization failed (continuing without AI reporting): model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+INFO:     Application startup complete.
 ERROR:root:Screenshot analysis error (full_page): a bytes-like object is required, not 'str'
 ERROR:root:Screenshot analysis error (viewport): a bytes-like object is required, not 'str'
-ERROR:root:Vision analysis error: a bytes-like object is required, not 'str'
-INFO:     127.0.0.1:45204 - "POST /api/v1/scan HTTP/1.1" 500 Internal Server Error
-ERROR:root:Screenshot analysis error (full_page): a bytes-like object is required, not 'str'
-ERROR:root:Screenshot analysis error (viewport): a bytes-like object is required, not 'str'
-ERROR:root:Vision analysis error: a bytes-like object is required, not 'str'
-INFO:     127.0.0.1:42752 - "POST /api/v1/scan HTTP/1.1" 500 Internal Server Error
+ERROR:root:Vision analysis error: 1 validation error for GenerateRequest
+prompt
+  Input should be a valid string [type=string_type, input_value=['\n        Analyze this ...QAUUUUAFFFFABRRRQB//Z'}], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.12/v/string_type
+ERROR:root:Text analysis error: model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+ERROR:root:Evidence analysis error: model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+ERROR:root:Report generation error: model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+INFO:     207.46.224.84:0 - "POST /api/v1/scan?url=https://example.com HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'cakra/core/database.py'. Reloading...
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [45448]
+INFO:     Finished server process [81708]
+WARNING:  StatReload detected changes in 'cakra/api/app.py'. Reloading...
+INFO:     Started server process [82312]
+INFO:     Waiting for application startup.
+WARNING:root:Model initialization failed (continuing without AI analysis): model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+WARNING:root:Reporter initialization failed (continuing without AI reporting): model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+INFO:     Application startup complete.
+INFO:     Started server process [82431]
+INFO:     Waiting for application startup.
+WARNING:root:Model initialization failed (continuing without AI analysis): model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+WARNING:root:Reporter initialization failed (continuing without AI reporting): model requires more system memory than is currently available unable to load full model on GPU (status code: 500)
+INFO:     Application startup complete.
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=100 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=100 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=100 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=100 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=100 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=100 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/statistics HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=10&days_back=7 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=100 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/scan-results?limit=100 HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     182.11.154.130:0 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [82431]
+INFO:     Stopping reloader process [81706]

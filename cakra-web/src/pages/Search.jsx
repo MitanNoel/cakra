@@ -1,14 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { Search as SearchIcon, Filter, X } from 'lucide-react';
+import { Search as SearchIcon, Filter, X, Loader2, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import DataGrid from '@/components/DataGrid';
 import ExportModal from '@/components/ExportModal';
 import ManualAnalysis from '@/components/ManualAnalysis';
-import { mockCrawlData } from '@/utils/mockData';
+import { api } from '@/lib/api';
+import { transformScanResult } from '@/utils/dataTransformers';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 
@@ -43,7 +44,29 @@ const Search = () => {
   });
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [crawlData, setCrawlData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const results = await api.getScanResults({ limit: 100 });
+        const transformed = transformScanResult(results);
+        setCrawlData(transformed);
+      } catch (err) {
+        setError(err.message || 'Failed to load search data');
+        console.error('Search data fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
@@ -60,7 +83,7 @@ const Search = () => {
   };
 
   const filteredData = useMemo(() => {
-    let filtered = mockCrawlData;
+    let filtered = crawlData;
 
     if (searchQuery) {
       const searchLower = searchQuery.toLowerCase();
@@ -85,17 +108,42 @@ const Search = () => {
       filtered = filtered.filter(item => item.status === filters.status);
     }
     if (filters.entities.length > 0) {
-      filtered = filtered.filter(item => filters.entities.some(entityType => 
+      filtered = filtered.filter(item => filters.entities.some(entityType =>
         item.entities_detected.some(entity => entity.toLowerCase().startsWith(entityType))
       ));
     }
 
     return filtered;
-  }, [searchQuery, filters]);
+  }, [searchQuery, filters, crawlData]);
 
   const handleRowClick = (row) => {
     navigate(`/analysis/${row.domain}`);
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-purple-400" />
+          <p className="text-gray-300">Loading search data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <AlertTriangle className="h-8 w-8 mx-auto mb-4 text-red-400" />
+          <p className="text-red-400 mb-4">Error loading search data: {error}</p>
+          <Button onClick={() => window.location.reload()} variant="outline">
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -165,7 +213,7 @@ const Search = () => {
           )}
 
           <div className="flex items-center justify-between text-sm text-gray-300">
-            <span>Showing {filteredData.length} of {mockCrawlData.length} results</span>
+            <span>Showing {filteredData.length} of {crawlData.length} results</span>
             <Button onClick={() => setIsExportModalOpen(true)} variant="outline" size="sm" disabled={filteredData.length === 0}>Export Results</Button>
           </div>
         </motion.div>
@@ -175,7 +223,7 @@ const Search = () => {
         </motion.div>
       </div>
 
-      <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} data={mockCrawlData} filteredData={filteredData} />
+      <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} data={crawlData} filteredData={filteredData} />
     </>
   );
 };

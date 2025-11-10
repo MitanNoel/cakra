@@ -1,12 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, ShieldCheck, AlertOctagon, Server, Code, Bug, DoorOpen, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Download, ShieldCheck, AlertOctagon, Server, Code, Bug, DoorOpen, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import ExportModal from '@/components/ExportModal';
-import { mockCrawlData } from '@/utils/mockData';
+import { api } from '@/lib/api';
+import { transformScanResult } from '@/utils/dataTransformers';
 
 const ConfidenceBadge = ({ score }) => {
   let level, color;
@@ -28,8 +29,30 @@ const Analysis = () => {
   const navigate = useNavigate();
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isRecommendationsOpen, setRecommendationsOpen] = useState(false);
+  const [domainData, setDomainData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const domainData = useMemo(() => mockCrawlData.find(item => item.domain === domain), [domain]);
+  useEffect(() => {
+    const fetchAnalysis = async () => {
+      if (!domain) return;
+
+      try {
+        setLoading(true);
+        setError(null);
+        const result = await api.getScanResult(domain);
+        const transformed = transformScanResult(result);
+        setDomainData(transformed);
+      } catch (err) {
+        setError(err.message || 'Failed to load analysis data');
+        console.error('Analysis fetch error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAnalysis();
+  }, [domain]);
 
   if (!domain) {
     return (
@@ -41,11 +64,23 @@ const Analysis = () => {
     );
   }
 
-  if (!domainData) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-purple-400" />
+          <p className="text-gray-300">Loading analysis for {domain}...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !domainData) {
     return (
       <div className="text-center">
-        <h1 className="text-2xl font-bold text-white mb-4">Domain Not Found</h1>
-        <p className="text-gray-300 mb-6">The requested domain <span className="font-bold text-purple-300">{domain}</span> could not be found.</p>
+        <AlertOctagon className="h-8 w-8 mx-auto mb-4 text-red-400" />
+        <h1 className="text-2xl font-bold text-white mb-4">Analysis Error</h1>
+        <p className="text-gray-300 mb-6">{error || `The requested domain ${domain} could not be found or analyzed.`}</p>
         <Button onClick={() => navigate('/search')} variant="outline"><ArrowLeft className="h-4 w-4 mr-2" />Back to Search</Button>
       </div>
     );
@@ -157,7 +192,7 @@ const Analysis = () => {
           </motion.div>
         </div>
 
-        <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} data={mockCrawlData} selectedDomain={domainData} />
+        <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} data={[domainData]} selectedDomain={domainData} />
       </div>
     </>
   );

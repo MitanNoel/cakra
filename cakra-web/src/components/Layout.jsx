@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import { Shield, Download } from 'lucide-react';
 import ApiInfo from '@/components/ApiInfo';
 import ExportModal from '@/components/ExportModal';
-import { mockCrawlData } from '@/utils/mockData';
 
 const navItems = [
   { path: '/', label: 'Dashboard' },
@@ -58,7 +57,7 @@ const Header = () => {
         </div>
         <ApiInfo />
       </header>
-      <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} data={mockCrawlData} />
+      <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} data={[]} />
     </>
   );
 };

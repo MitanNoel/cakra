@@ -1,0 +1,14 @@
+nohup: ignoring input
+
+> cakra-dashboard@0.0.0 dev
+> vite --host 0.0.0.0
+
+
+  VITE v7.2.2  ready in 230 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://10.0.10.195:5173/
+6:03:35 PM [vite] (client) hmr update /src/pages/Dashboard.jsx, /src/pages/Search.jsx, /src/pages/Analysis.jsx, /src/components/ManualAnalysis.jsx, /src/index.css
+6:21:34 PM [vite] (client) hmr update /src/pages/Dashboard.jsx, /src/pages/Search.jsx, /src/pages/Analysis.jsx, /src/components/ManualAnalysis.jsx, /src/index.css
+6:21:35 PM [vite] (client) hmr update /src/pages/Analysis.jsx, /src/index.css
+6:21:41 PM [vite] (client) hmr update /src/components/Layout.jsx, /src/index.css

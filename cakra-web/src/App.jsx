@@ -7,6 +7,7 @@ import Search from '@/pages/Search';
 import Analysis from '@/pages/Analysis';
 import { Toaster } from '@/components/ui/toaster';
 import { ApiProvider } from '@/hooks/useApi';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 function App() {
   return (
@@ -19,12 +20,14 @@ function App() {
         <Router>
           <div className="min-h-screen bg-black text-white">
             <Layout>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/search" element={<Search />} />
-                <Route path="/analysis/:domain" element={<Analysis />} />
-                <Route path="/analysis" element={<Analysis />} />
-              </Routes>
+              <ErrorBoundary>
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/search" element={<Search />} />
+                  <Route path="/analysis/:domain" element={<Analysis />} />
+                  <Route path="/analysis" element={<Analysis />} />
+                </Routes>
+              </ErrorBoundary>
             </Layout>
             <Toaster />
           </div>

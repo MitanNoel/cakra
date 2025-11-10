@@ -65,7 +65,7 @@ class ContentAnalyst(BatchAgent):
         """
     
     async def initialize(self) -> None:
-        """Verify Ollama models are available"""
+        """Verify Ollama models are available (optional for startup)"""
         try:
             # Test models
             await asyncio.gather(
@@ -73,9 +73,10 @@ class ContentAnalyst(BatchAgent):
                 self._test_model(self.vision_model)
             )
             self.is_initialized = True
+            logging.info("Analyst agent initialized successfully")
         except Exception as e:
-            logging.error(f"Model initialization error: {str(e)}")
-            raise
+            logging.warning(f"Model initialization failed (continuing without AI analysis): {str(e)}")
+            self.is_initialized = False  # Allow startup without models
     
     async def _test_model(self, model_name: str) -> None:
         """Test if a model is available and responding"""

@@ -88,7 +88,7 @@ curl -fsSL https://ollama.ai/install.sh | sh
 ollama serve
 
 # Pull required models
-ollama pull qwen2:7b
+ollama pull claude-sonnet-4.5
 ollama pull llava-phi3
 ollama pull llama2:7b
 ```
@@ -98,30 +98,41 @@ For subsequent runs, simply use:
 ollama serve
 ```
 
-## Running the System
+## Quick Start
 
-### Start Backend
-1. Ensure Ollama is running in a separate terminal
-2. Navigate to the backend directory and start the server:
-   ```bash
-   cd cakra-system
-   python -m cakra serve
-   ```
-   The backend will start the web interface at http://localhost:5000 and API at http://localhost:5000/api/v1
+### One-Command Startup (Recommended)
+```bash
+./start-cakra.sh
+```
+This comprehensive script starts both services with proper error checking and cleanup.
 
-### Start Frontend Dashboard
-1. In a new terminal, navigate to the web directory:
-   ```bash
-   cd cakra-web
-   npm run dev
-   ```
-2. Open your browser and go to `http://localhost:5173` (or the port shown in the terminal)
+### Simple One-Liner Alternative
+```bash
+./run-cakra.sh
+```
+Minimal script that starts both services quickly.
 
-### Full System Operation
-- Backend provides both a web interface for direct access and API endpoints for the frontend dashboard
-- Frontend dashboard connects to the backend API to display results and provide enhanced user experience
-- Both services need to be running simultaneously for full functionality
-- The backend can also be used standalone via CLI: `python -m cakra scan <url>`
+### Manual Startup
+If you prefer to start services manually:
+
+**Terminal 1 - Backend:**
+```bash
+cd cakra-system
+pip install -r requirements.txt
+python -m cakra serve
+```
+
+**Terminal 2 - Frontend:**
+```bash
+cd cakra-web
+npm install
+npm run dev
+```
+
+### Access URLs
+- **Frontend Dashboard**: http://localhost:5173
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
 
 ## Troubleshooting
 

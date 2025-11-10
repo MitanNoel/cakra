@@ -7,52 +7,35 @@ export const useApi = () => useContext(ApiContext);
 export const ApiProvider = ({ children }) => {
   const [apiStatus, setApiStatus] = useState('Connecting...');
   const [apiVersion, setApiVersion] = useState('N/A');
-  const apiEndpoint = 'https://api.cakra.local';
-
-  const mockFetch = (endpoint) => {
-    return new Promise(resolve => {
-      setTimeout(() => {
-        if (endpoint === '/health') {
-          resolve({ ok: true, json: () => Promise.resolve({ status: 'Connected' }) });
-        } else if (endpoint === '/version') {
-          resolve({ ok: true, json: () => Promise.resolve({ version: 'v1.2.0' }) });
-        }
-      }, 500);
-    });
-  };
+  const apiEndpoint = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
   useEffect(() => {
     const checkApiStatus = async () => {
       try {
-        const healthResponse = await mockFetch('/health');
-        if (healthResponse.ok) {
-          const healthData = await healthResponse.json();
-          setApiStatus(healthData.status);
+        const response = await fetch(`${apiEndpoint}/api/v1/health`);
+        if (response.ok) {
+          const data = await response.json();
+          setApiStatus('Connected');
+          setApiVersion(data.version || 'v1.0.0');
         } else {
-          setApiStatus('Disconnected');
-        }
-
-        const versionResponse = await mockFetch('/version');
-        if (versionResponse.ok) {
-          const versionData = await versionResponse.json();
-          setApiVersion(versionData.version);
+          setApiStatus('Error');
+          setApiVersion('N/A');
         }
       } catch (error) {
         setApiStatus('Disconnected');
+        setApiVersion('N/A');
       }
     };
 
     checkApiStatus();
-    const interval = setInterval(checkApiStatus, 30000); // Check every 30 seconds
-
+    // Check every 30 seconds
+    const interval = setInterval(checkApiStatus, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [apiEndpoint]);
 
-  const value = {
-    apiStatus,
-    apiVersion,
-    apiEndpoint,
-  };
-
-  return <ApiContext.Provider value={value}>{children}</ApiContext.Provider>;
+  return (
+    <ApiContext.Provider value={{ apiStatus, apiVersion, apiEndpoint }}>
+      {children}
+    </ApiContext.Provider>
+  );
 };
